@@ -11,7 +11,7 @@ setup(
                 "LAMMPS / GROMACS system generator.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    author="Uzair Dogar",
+    author="Muhammad Uzair Riaz",
     packages=find_packages(),
     include_package_data=True,
     package_data={"paaf": ["data/*.csv", "gui/assets/*.png",

@@ -88,6 +88,81 @@ Minimum useful setup for testing: **DL_FIELD + packmol + LAMMPS**.
 #### Conda itself (if you don't have it)
 - Miniconda: https://docs.conda.io/en/latest/miniconda.html
 
+### 1.3 Copy-paste setup per operating system
+
+#### macOS
+
+```bash
+# Homebrew (if missing): https://brew.sh
+brew install packmol lammps gromacs git
+
+# Miniconda, then:
+conda create -n paaf python=3.11
+conda activate paaf
+conda install -c conda-forge rdkit openbabel mbuild numpy scipy networkx pyyaml
+pip install PyQt5 pytest
+
+# DL_FIELD: register at https://www.ccp5.ac.uk/dl_field-registration,
+# unpack to ~/dl_f_4.13 (no spaces in the path), then:
+cd ~/dl_f_4.13 && make      # needs gfortran: brew install gcc
+
+git clone https://github.com/MuhammadUzairRiaz/PAAF.git
+cd PAAF && python run_paaf.py
+```
+
+#### Linux (Ubuntu / Debian)
+
+```bash
+sudo apt update
+sudo apt install -y git build-essential gfortran packmol gromacs lammps
+
+# Miniconda, then:
+conda create -n paaf python=3.11
+conda activate paaf
+conda install -c conda-forge rdkit openbabel mbuild numpy scipy networkx pyyaml
+pip install PyQt5 pytest
+
+# DL_FIELD: register at https://www.ccp5.ac.uk/dl_field-registration,
+# unpack to ~/dl_f_4.13 (no spaces in the path), then:
+cd ~/dl_f_4.13 && make
+
+git clone https://github.com/MuhammadUzairRiaz/PAAF.git
+cd PAAF && python run_paaf.py
+```
+
+If `apt` has no `lammps`/`packmol` on your distro, use conda instead:
+`conda install -c conda-forge lammps packmol`.
+
+#### Windows
+
+**Recommended: WSL2** (Windows Subsystem for Linux) — DL_FIELD is Fortran
+source and GROMACS has no native Windows conda build, so the Linux path
+inside WSL is by far the smoothest:
+
+```powershell
+wsl --install -d Ubuntu     # PowerShell as Administrator, then reboot
+```
+
+Open the Ubuntu terminal and follow the **Linux** instructions above
+verbatim (the GUI displays through WSLg automatically on Windows 11).
+
+**Native Windows (partial)** — the GUI, builder, and packing work; DL_FIELD
+typing requires a Fortran build and is easier under WSL:
+
+```powershell
+winget install Git.Git
+# Miniconda from https://docs.conda.io/en/latest/miniconda.html then, in
+# an "Anaconda Prompt":
+conda create -n paaf python=3.11
+conda activate paaf
+conda install -c conda-forge rdkit openbabel mbuild numpy scipy networkx pyyaml packmol lammps
+pip install PyQt5 pytest
+
+git clone https://github.com/MuhammadUzairRiaz/PAAF.git
+cd PAAF
+python run_paaf.py
+```
+
 ### 1.3 Launch
 
 ```bash
@@ -161,4 +236,4 @@ run_paaf.py      GUI launcher
 
 ## Author
 
-Uzair Dogar — PAAF v0.1.0. Issues and feedback via GitHub Issues.
+Muhammad Uzair Riaz — PAAF v0.1.0. Issues and feedback via GitHub Issues.
