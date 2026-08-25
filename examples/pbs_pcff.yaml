@@ -1,0 +1,37 @@
+# PBS with PCFF (Class-II) converted from DL_FIELD's lib.
+project_name: PBS_20mer_pcff
+output_dir: ./mta_output
+
+monomers:
+  - file: ./examples/monomers/PBS_monomer.pdb
+    name: PBS
+    head: 1
+    tail: 25
+    head_h: 3
+    tail_h: 14
+
+optimizer:
+  enabled: true
+  ff: MMFF94
+  steps: 20000
+
+chain:
+  n_monomers: 20
+  mode: homopolymer
+  backend: simple
+
+box:
+  n_chains: 1
+  size: [60, 60, 60]
+
+force_field:
+  key: pcff
+  # Change this to wherever you extracted dl_f_4.13:
+  dl_lib_dir: /Users/uzair/project/dl_f_4.13/lib
+
+lammps:
+  ensemble: npt
+  temperature: 300.0
+  pressure: 1.0
+  steps: 500000
+  timestep: 1.0

@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+  html, body { margin: 0; padding: 0; background: #E7EAEF; }
+  * { box-sizing: border-box; }
+  a { color: #1D4ED8; text-decoration: none; }
+  a:hover { color: #12379B; text-decoration: underline; }
+</style>
+</helmet>
+
+<div style="font-family: 'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif; color: #0F172A; padding: 40px; display: flex; flex-direction: column; gap: 56px; align-items: flex-start;">
+
+  <div style="max-width: 900px; display: flex; flex-direction: column; gap: 10px;">
+    <div style="font-family: Consolas, 'DejaVu Sans Mono', monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #64748B;">PAAF · Polymer Auto-Assembly Framework · UI redesign v1</div>
+    <div style="font-size: 34px; font-weight: 600; letter-spacing: -0.01em;">Design system &amp; screens for PyQt5</div>
+    <div style="font-size: 15px; line-height: 1.65; color: #475569; text-wrap: pretty;">Every value below is expressible in Qt Style Sheets. Layout in the mockups uses only single-direction rows and columns, each one mapping to a QHBoxLayout, QVBoxLayout, QFormLayout, or QGridLayout — no CSS grid, no wrapping, no animation, no blur. Two system font families only. Deviations from your current tokens are marked <span style="font-family: Consolas, monospace; font-size: 12px; background: #FFFBEB; border: 1px solid #FDE68A; padding: 1px 5px; border-radius: 3px; color: #92400E;">NOTE</span>.</div>
+  </div>
+
+  <sc-if value="{{ showSpec }}" hint-placeholder-val="{{ true }}">
+  <div style="display: flex; flex-direction: column; gap: 24px; width: 1440px;">
+
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B; border-bottom: 1px solid #CBD5E1; padding-bottom: 8px;">1 · Tokens</div>
+
+    <div style="display: flex; flex-direction: row; gap: 24px; align-items: stretch;">
+
+      <div style="width: 700px; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+        <div style="padding: 10px 14px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; font-size: 12px; font-weight: 600;">Color roles</div>
+        <div style="padding: 6px 0;">
+          <div style="display: flex; flex-direction: row; padding: 6px 14px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">
+            <div style="width: 40px;"></div><div style="width: 210px;">token</div><div style="width: 96px;">hex</div><div style="flex: 1;">use</div>
+          </div>
+          <sc-for list="{{ colorTokens }}" as="t" hint-placeholder-count="14">
+            <div style="display: flex; flex-direction: row; align-items: center; padding: 4px 14px; border-top: 1px solid #F1F5F9; height: 30px;">
+              <div style="width: 40px;"><div style="width: 22px; height: 22px; border-radius: 4px; border: 1px solid #CBD5E1; background: {{ t.hex }};"></div></div>
+              <div style="width: 210px; font-family: Consolas, monospace; font-size: 12px; color: #0F172A;">{{ t.name }}</div>
+              <div style="width: 96px; font-family: Consolas, monospace; font-size: 12px; color: #475569;">{{ t.hex }}</div>
+              <div style="flex: 1; font-size: 12px; color: #475569;">{{ t.use }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="flex: 1; display: flex; flex-direction: column; gap: 24px;">
+
+        <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+          <div style="padding: 10px 14px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; font-size: 12px; font-weight: 600;">Type scale — 12px base, system UI font</div>
+          <div style="padding: 4px 0;">
+            <div style="display: flex; flex-direction: row; align-items: baseline; padding: 7px 14px; border-bottom: 1px solid #F1F5F9;"><div style="width: 150px; font-family: Consolas, monospace; font-size: 11px; color: #64748B;">display / 20px 600</div><div style="font-size: 20px; font-weight: 600;">Force field</div></div>
+            <div style="display: flex; flex-direction: row; align-items: baseline; padding: 7px 14px; border-bottom: 1px solid #F1F5F9;"><div style="width: 150px; font-family: Consolas, monospace; font-size: 11px; color: #64748B;">section / 13px 600</div><div style="font-size: 13px; font-weight: 600;">Atom typing</div></div>
+            <div style="display: flex; flex-direction: row; align-items: baseline; padding: 7px 14px; border-bottom: 1px solid #F1F5F9;"><div style="width: 150px; font-family: Consolas, monospace; font-size: 11px; color: #64748B;">body / 12px 400</div><div style="font-size: 12px;">Target density in g/cm³</div></div>
+            <div style="display: flex; flex-direction: row; align-items: baseline; padding: 7px 14px; border-bottom: 1px solid #F1F5F9;"><div style="width: 150px; font-family: Consolas, monospace; font-size: 11px; color: #64748B;">strong / 12px 600</div><div style="font-size: 12px; font-weight: 600;">3 bonds formed</div></div>
+            <div style="display: flex; flex-direction: row; align-items: baseline; padding: 7px 14px; border-bottom: 1px solid #F1F5F9;"><div style="width: 150px; font-family: Consolas, monospace; font-size: 11px; color: #64748B;">caption / 11px 400</div><div style="font-size: 11px; color: #475569;">OpenBabel 3.1.1 detected</div></div>
+            <div style="display: flex; flex-direction: row; align-items: baseline; padding: 7px 14px; border-bottom: 1px solid #F1F5F9;"><div style="width: 150px; font-family: Consolas, monospace; font-size: 11px; color: #64748B;">overline / 10px 600</div><div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Reactants</div></div>
+            <div style="display: flex; flex-direction: row; align-items: baseline; padding: 7px 14px;"><div style="width: 150px; font-family: Consolas, monospace; font-size: 11px; color: #64748B;">mono / 12px</div><div style="font-family: Consolas, 'DejaVu Sans Mono', monospace; font-size: 12px;">C(=O)O[C:1]CC</div></div>
+          </div>
+        </div>
+
+        <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+          <div style="padding: 10px 14px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; font-size: 12px; font-weight: 600;">Spacing, radius, borders, elevation</div>
+          <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 9px; font-size: 12px; color: #475569; line-height: 1.5;">
+            <div><span style="font-family: Consolas, monospace; color: #0F172A;">space</span> 4 · 8 · 12 · 16 · 24 · 32. Form row gap 8, label→field 8, card padding 14, page padding 20, section gap 16.</div>
+            <div><span style="font-family: Consolas, monospace; color: #0F172A;">control height</span> 26 (input, combo, spin, button) · <span style="font-family: Consolas, monospace; color: #0F172A;">table row</span> 28 · <span style="font-family: Consolas, monospace; color: #0F172A;">header row</span> 26 · <span style="font-family: Consolas, monospace; color: #0F172A;">sidebar item</span> 30.</div>
+            <div><span style="font-family: Consolas, monospace; color: #0F172A;">radius</span> 3 controls · 6 cards and panels · 10 pills/badges. Nothing else.</div>
+            <div><span style="font-family: Consolas, monospace; color: #0F172A;">borders</span> 1px #E2E8F0 default · #CBD5E1 for a card that owns focus or a table outline · 2px #2563EB focus ring drawn as a border, with padding reduced by 1px so the control does not resize.</div>
+            <div><span style="font-family: Consolas, monospace; color: #0F172A;">elevation</span> no shadows. Depth is three background planes plus border weight: page #F1F5F9 → card #FFFFFF → sunken/read-only #F8FAFC. Modal dialogs get a #CBD5E1 border and a 1px inner #F1F5F9 line instead of a drop shadow.</div>
+            <div><span style="font-family: Consolas, monospace; color: #0F172A;">icons</span> one 16px monochrome stroke set (Lucide, shipped as SVG resources, recolored per state via QIcon modes). Icons never carry meaning alone — always paired with a label or a text status.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: row; gap: 24px;">
+      <div style="flex: 1; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+        <div style="padding: 10px 14px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; font-size: 12px; font-weight: 600;">Components — live states</div>
+        <div style="padding: 16px; display: flex; flex-direction: column; gap: 18px;">
+
+          <div style="display: flex; flex-direction: row; align-items: center; gap: 10px;">
+            <div style="width: 96px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">buttons</div>
+            <div style="height: 26px; padding: 0 14px; border-radius: 3px; background: #2563EB; border: 1px solid #1D4ED8; color: #FFFFFF; font-size: 12px; font-weight: 600; display: flex; align-items: center;" style-hover="background: #1D4ED8;">Validate reaction</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; color: #0F172A; font-size: 12px; display: flex; align-items: center;" style-hover="background: #F1F5F9;">Add to library</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: transparent; border: 1px solid transparent; color: #1D4ED8; font-size: 12px; display: flex; align-items: center;">Load example</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #94A3B8; font-size: 12px; display: flex; align-items: center;">Disabled</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #FCA5A5; color: #B91C1C; font-size: 12px; display: flex; align-items: center;">Remove all</div>
+          </div>
+
+          <div style="display: flex; flex-direction: row; align-items: center; gap: 10px;">
+            <div style="width: 96px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">inputs</div>
+            <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; color: #0F172A; display: flex; align-items: center;">Default</div>
+            <div style="width: 150px; height: 26px; border: 2px solid #2563EB; border-radius: 3px; background: #FFFFFF; padding: 0 7px; font-size: 12px; color: #0F172A; display: flex; align-items: center;">Focused</div>
+            <div style="width: 150px; height: 26px; border: 1px solid #DC2626; border-radius: 3px; background: #FEF2F2; padding: 0 8px; font-size: 12px; color: #991B1B; display: flex; align-items: center;">Invalid</div>
+            <div style="width: 110px; height: 26px; border: 1px solid #E2E8F0; border-radius: 3px; background: #F8FAFC; padding: 0 8px; font-size: 12px; color: #94A3B8; display: flex; align-items: center;">Read-only</div>
+            <div style="width: 120px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;"><span>GAFF</span><span style="color: #64748B; font-size: 10px;">▾</span></div>
+            <div style="width: 92px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; display: flex; align-items: center;"><span style="flex: 1; padding: 0 8px; font-size: 12px; font-family: Consolas, monospace;">1.05</span><span style="width: 18px; border-left: 1px solid #E2E8F0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 8px; color: #64748B; line-height: 1.1;">▴<br>▾</span></div>
+          </div>
+
+          <div style="display: flex; flex-direction: row; align-items: center; gap: 10px;">
+            <div style="width: 96px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">badges</div>
+            <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #15803D; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 5px;"><span>✓</span><span>Validated</span></div>
+            <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 5px;"><span>!</span><span>2 warnings</span></div>
+            <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 5px;"><span>✕</span><span>Error</span></div>
+            <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #475569; font-size: 11px; font-weight: 600; display: flex; align-items: center;">Not run</div>
+            <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #EFF6FF; border: 1px solid #BFDBFE; color: #1D4ED8; font-size: 11px; font-weight: 600; display: flex; align-items: center;">Running…</div>
+            <div style="font-family: Consolas, monospace; font-size: 12px; background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 1px 5px; color: #0F766E;">[C:1]</div>
+            <div style="font-size: 11px; color: #64748B;">← atom-map token</div>
+          </div>
+
+          <div style="display: flex; flex-direction: row; align-items: flex-start; gap: 10px;">
+            <div style="width: 96px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8; padding-top: 6px;">tabs</div>
+            <div style="display: flex; flex-direction: row; border-bottom: 1px solid #E2E8F0;">
+              <div style="height: 30px; padding: 0 14px; font-size: 12px; color: #64748B; border-bottom: 2px solid transparent; display: flex; align-items: center;">File upload</div>
+              <div style="height: 30px; padding: 0 14px; font-size: 12px; color: #64748B; border-bottom: 2px solid transparent; display: flex; align-items: center;">SMILES</div>
+              <div style="height: 30px; padding: 0 14px; font-size: 12px; font-weight: 600; color: #1D4ED8; border-bottom: 2px solid #2563EB; display: flex; align-items: center;">Reaction scheme</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="width: 420px; background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #92400E;">Deviations from your tokens</div>
+        <div style="font-size: 12px; line-height: 1.55; color: #713F12; display: flex; flex-direction: column; gap: 8px;">
+          <div><b>Sidebar #0F1B2D</b> (was #0F172A). Slightly bluer and darker so the sidebar reads as chrome, not as another surface; keeps 14:1 against white labels.</div>
+          <div><b>Page background #F1F5F9</b> (was #F8FAFC). #F8FAFC was too close to white — cards had no edge. #F8FAFC is now the <i>sunken</i> plane (read-only fields, table header, card header) which is what buys you elevation without shadows.</div>
+          <div><b>Borders</b> corrected to #E2E8F0 / #CBD5E1 (your #e2e8f0 pair is kept; the darker step is new and carries emphasis).</div>
+          <div><b>Success #15803D, warn #92400E, danger #B91C1C for text</b>; your #16A34A / #D97706 / #DC2626 stay as fill and border colors. The originals fail 4.5:1 as small text on white.</div>
+          <div><b>New role: map-token teal #0F766E</b> on #ECFDF5. Atom maps are a third semantic category — neither state nor primary action — and needed their own color that cannot be confused with success green or link blue.</div>
+          <div><b>Type</b>: 12px base kept, but the scale is fixed to 10/11/12/13/20 only. Everything in the current build between 12 and 16px collapses into 13px section headers.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+  <div style="display: flex; flex-direction: column; gap: 24px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B; border-bottom: 1px solid #CBD5E1; padding-bottom: 8px; width: 1440px;">2 · Reaction scheme — empty state</div>
+
+    <div id="scr-empty" style="width: 1440px; height: 900px; background: #F1F5F9; border: 1px solid #94A3B8; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column;">
+
+      <div style="height: 40px; background: #0F1B2D; border-bottom: 1px solid #1E293B; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 12px;">
+        <div style="font-size: 12px; font-weight: 600; color: #FFFFFF;">PAAF</div>
+        <div style="width: 1px; height: 18px; background: #334155;"></div>
+        <div style="font-size: 12px; color: #CBD5E1;">PLA-crosslink-study.paaf</div>
+        <div style="font-size: 11px; color: #64748B; font-family: Consolas, monospace;">unsaved</div>
+        <div style="flex: 1;"></div>
+        <div style="font-size: 11px; color: #94A3B8;">Step 1 of 6 · Builder</div>
+      </div>
+
+      <div style="flex: 1; display: flex; flex-direction: row; min-height: 0;">
+
+        <div style="width: 232px; background: #0F1B2D; display: flex; flex-direction: column; padding: 12px 0;">
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Pipeline</div>
+          <div style="display: flex; flex-direction: column;">
+            <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 10px; background: #1D4ED8; border-left: 3px solid #60A5FA;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #FFFFFF; color: #1D4ED8; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">1</div><div style="flex: 1; font-size: 12px; font-weight: 600; color: #FFFFFF;">Builder</div><div style="font-size: 10px; color: #BFDBFE; font-family: Consolas, monospace;">NOW</div></div>
+            <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;" style-hover="background: #1B2A40;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">2</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Chain</div></div>
+            <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">3</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Optimize</div></div>
+            <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">4</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Force field</div></div>
+            <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">5</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Box</div></div>
+            <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">6</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Export</div></div>
+          </div>
+          <div style="height: 1px; background: #1E293B; margin: 12px 0;"></div>
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Tools</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Reactions</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">System builder</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Blend</div>
+          <div style="flex: 1;"></div>
+          <div style="margin: 0 14px; padding: 10px; background: #16233A; border: 1px solid #1E3A5F; border-radius: 6px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="font-size: 11px; color: #94A3B8;">Pipeline progress</div>
+            <div style="height: 4px; background: #0B1626; border-radius: 2px; overflow: hidden;"><div style="width: 8%; height: 100%; background: #3B82F6;"></div></div>
+            <div style="font-size: 11px; color: #64748B; font-family: Consolas, monospace;">0 of 6 complete</div>
+          </div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+
+          <div style="background: #FFFFFF; border-bottom: 1px solid #E2E8F0; padding: 14px 20px 0; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 11px; color: #64748B;"><span>Pipeline</span><span style="color: #CBD5E1;">›</span><span>Step 1 · Builder</span><span style="color: #CBD5E1;">›</span><span style="color: #0F172A; font-weight: 600;">Reaction scheme</span></div>
+            <div style="display: flex; flex-direction: row; align-items: flex-end; gap: 12px;">
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">
+                <div style="font-size: 20px; font-weight: 600; letter-spacing: -0.01em;">Builder</div>
+                <div style="font-size: 12px; color: #475569;">Define the monomer or reaction that everything downstream is built from.</div>
+              </div>
+              <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #475569; font-size: 11px; font-weight: 600; display: flex; align-items: center; margin-bottom: 4px;">No monomer yet</div>
+            </div>
+            <div style="display: flex; flex-direction: row;">
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; border-bottom: 2px solid transparent; display: flex; align-items: center;">File upload</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; border-bottom: 2px solid transparent; display: flex; align-items: center;">SMILES</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; border-bottom: 2px solid transparent; display: flex; align-items: center;">Periodic builder</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; font-weight: 600; color: #1D4ED8; border-bottom: 2px solid #2563EB; display: flex; align-items: center; gap: 6px;">Reaction scheme<span style="height: 14px; padding: 0 5px; border-radius: 7px; background: #EFF6FF; border: 1px solid #BFDBFE; font-size: 9px; letter-spacing: 0.06em;">NEW</span></div>
+            </div>
+          </div>
+
+          <div style="flex: 1; padding: 20px; display: flex; flex-direction: row; gap: 16px; min-height: 0; overflow: hidden;">
+
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 16px; min-width: 0;">
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px; display: flex; flex-direction: column;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Reactants</div>
+                  <div style="font-size: 11px; color: #94A3B8;">molecules consumed by the reaction</div>
+                  <div style="flex: 1;"></div>
+                  <div style="height: 22px; padding: 0 10px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 11px; display: flex; align-items: center; gap: 5px;"><span style="color: #1D4ED8; font-weight: 700;">+</span>Add molecule</div>
+                </div>
+                <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+                  <div style="display: flex; flex-direction: row; gap: 8px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">
+                    <div style="width: 20px;"></div><div style="width: 150px;">name</div><div style="flex: 1;">SMILES with atom maps</div><div style="width: 66px;">maps</div><div style="width: 24px;"></div>
+                  </div>
+                  <div style="display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                    <div style="width: 20px; font-family: Consolas, monospace; font-size: 11px; color: #94A3B8; text-align: center;">1</div>
+                    <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; color: #94A3B8; display: flex; align-items: center;">e.g. acid</div>
+                    <div style="flex: 1; height: 26px; border: 2px solid #2563EB; border-radius: 3px; background: #FFFFFF; padding: 0 7px; font-family: Consolas, monospace; font-size: 12px; color: #94A3B8; display: flex; align-items: center;">paste SMILES…</div>
+                    <div style="width: 66px; font-size: 11px; color: #CBD5E1; font-family: Consolas, monospace;">—</div>
+                    <div style="width: 24px; height: 24px; border: 1px solid #E2E8F0; border-radius: 3px; color: #94A3B8; font-size: 12px; display: flex; align-items: center; justify-content: center;">✕</div>
+                  </div>
+                  <div style="display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                    <div style="width: 20px; font-family: Consolas, monospace; font-size: 11px; color: #94A3B8; text-align: center;">2</div>
+                    <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; color: #94A3B8; display: flex; align-items: center;">e.g. alcohol</div>
+                    <div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; color: #94A3B8; display: flex; align-items: center;">paste SMILES…</div>
+                    <div style="width: 66px; font-size: 11px; color: #CBD5E1; font-family: Consolas, monospace;">—</div>
+                    <div style="width: 24px; height: 24px; border: 1px solid #E2E8F0; border-radius: 3px; color: #94A3B8; font-size: 12px; display: flex; align-items: center; justify-content: center;">✕</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 0 4px;">
+                <div style="flex: 1; height: 1px; background: #E2E8F0;"></div>
+                <div style="height: 22px; padding: 0 12px; border-radius: 11px; background: #FFFFFF; border: 1px solid #CBD5E1; display: flex; flex-direction: row; align-items: center; gap: 8px;">
+                  <span style="font-family: Consolas, monospace; font-size: 13px; color: #0F172A;">→</span>
+                  <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #475569;">reacts to form</span>
+                </div>
+                <div style="flex: 1; height: 1px; background: #E2E8F0;"></div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Product</div>
+                  <div style="font-size: 11px; color: #94A3B8;">one molecule, reusing the same map numbers</div>
+                </div>
+                <div style="padding: 12px 14px; display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                  <div style="width: 20px;"></div>
+                  <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; color: #94A3B8; display: flex; align-items: center;">e.g. ester</div>
+                  <div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; color: #94A3B8; display: flex; align-items: center;">paste SMILES…</div>
+                  <div style="width: 66px; font-size: 11px; color: #CBD5E1; font-family: Consolas, monospace;">—</div>
+                  <div style="width: 24px;"></div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px dashed #CBD5E1; border-radius: 6px; padding: 28px; display: flex; flex-direction: column; align-items: center; gap: 10px;">
+                <div style="font-size: 13px; font-weight: 600; color: #475569;">Nothing to validate yet</div>
+                <div style="width: 460px; font-size: 12px; color: #64748B; line-height: 1.55; text-align: center; text-wrap: pretty;">Enter your reactants and product with matching atom maps, then run <b>Validate reaction</b>. PAAF will report the bonds it forms and breaks before anything is written to disk.</div>
+                <div style="display: flex; flex-direction: row; gap: 8px; padding-top: 4px;">
+                  <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 12px; display: flex; align-items: center;">Load esterification example</div>
+                  <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 12px; display: flex; align-items: center;">Open library JSON…</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="width: 340px; display: flex; flex-direction: column; gap: 16px;">
+
+              <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; display: flex; flex-direction: column;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 12px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">How atom maps work</div>
+                </div>
+                <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+                  <div style="font-size: 12px; color: #475569; line-height: 1.55; text-wrap: pretty;">A map number tags one atom so PAAF can follow it through the reaction. Write it inside brackets after the element: <span style="font-family: Consolas, monospace; background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 1px 4px; color: #0F766E;">[C:1]</span>. The <b>same number on both sides</b> means the same atom.</div>
+                  <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 7px;">
+                    <div style="font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">worked example · esterification</div>
+                    <div style="display: flex; flex-direction: row; gap: 6px; align-items: baseline;"><div style="width: 52px; font-size: 11px; color: #64748B;">acid</div><div style="font-family: Consolas, monospace; font-size: 12px; color: #0F172A;">CC(=O)<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[OH:1]</span></div></div>
+                    <div style="display: flex; flex-direction: row; gap: 6px; align-items: baseline;"><div style="width: 52px; font-size: 11px; color: #64748B;">alcohol</div><div style="font-family: Consolas, monospace; font-size: 12px; color: #0F172A;"><span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[C:2]</span>CO</div></div>
+                    <div style="display: flex; flex-direction: row; gap: 6px; align-items: baseline;"><div style="width: 52px; font-size: 11px; color: #64748B;">product</div><div style="font-family: Consolas, monospace; font-size: 12px; color: #0F172A;">CC(=O)O<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[C:2]</span></div></div>
+                    <div style="font-size: 11px; color: #64748B; line-height: 1.5;">Map 2 survives, so O bonds to it. Map 1 is absent from the product, so that OH leaves as water.</div>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 5px;">
+                    <div style="font-size: 11px; font-weight: 600; color: #0F172A;">Three rules</div>
+                    <div style="font-size: 11px; color: #475569; line-height: 1.5;">1 · Map only the atoms whose bonds change.<br>2 · Every number must be unique per side.<br>3 · A number missing from the product is a leaving group — intentional or a mistake.</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 12px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Map numbers in use</div>
+                </div>
+                <div style="padding: 16px 12px; display: flex; flex-direction: column; align-items: center; gap: 6px;">
+                  <div style="font-size: 12px; color: #64748B;">None yet</div>
+                  <div style="font-size: 11px; color: #94A3B8; text-align: center; line-height: 1.5;">Tokens appear here as you type, paired left to right.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="height: 48px; background: #FFFFFF; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 10px;">
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; border: 1px solid #CBD5E1; background: #FFFFFF; font-size: 12px; color: #94A3B8; display: flex; align-items: center;">‹ Back</div>
+            <div style="flex: 1; font-size: 11px; color: #64748B;">Enter at least one reactant and a product to continue.</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #94A3B8; font-size: 12px; display: flex; align-items: center;">Add to library</div>
+            <div style="height: 26px; padding: 0 14px; border-radius: 3px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #94A3B8; font-size: 12px; font-weight: 600; display: flex; align-items: center;">Validate reaction</div>
+            <div style="width: 1px; height: 22px; background: #E2E8F0;"></div>
+            <div style="height: 26px; padding: 0 14px; border-radius: 3px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #94A3B8; font-size: 12px; display: flex; align-items: center;">Next: Chain ›</div>
+          </div>
+
+          <div style="height: 24px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 14px; font-size: 11px; color: #64748B;">
+            <div style="display: flex; flex-direction: row; align-items: center; gap: 5px;"><div style="width: 6px; height: 6px; border-radius: 3px; background: #16A34A;"></div>RDKit 2024.03 · OpenBabel 3.1.1</div>
+            <div style="width: 1px; height: 12px; background: #E2E8F0;"></div>
+            <div>Ready</div>
+            <div style="flex: 1;"></div>
+            <div style="font-family: Consolas, monospace;">Log (0)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 24px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B; border-bottom: 1px solid #CBD5E1; padding-bottom: 8px; width: 1440px;">3 · Reaction scheme — validated</div>
+
+    <div id="scr-valid" style="width: 1440px; height: 980px; background: #F1F5F9; border: 1px solid #94A3B8; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column;">
+
+      <div style="height: 40px; background: #0F1B2D; border-bottom: 1px solid #1E293B; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 12px;">
+        <div style="font-size: 12px; font-weight: 600; color: #FFFFFF;">PAAF</div>
+        <div style="width: 1px; height: 18px; background: #334155;"></div>
+        <div style="font-size: 12px; color: #CBD5E1;">PLA-crosslink-study.paaf</div>
+        <div style="flex: 1;"></div>
+        <div style="font-size: 11px; color: #94A3B8;">Step 1 of 6 · Builder</div>
+      </div>
+
+      <div style="flex: 1; display: flex; flex-direction: row; min-height: 0;">
+
+        <div style="width: 232px; background: #0F1B2D; display: flex; flex-direction: column; padding: 12px 0;">
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Pipeline</div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 10px; background: #1D4ED8; border-left: 3px solid #60A5FA;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #FFFFFF; color: #1D4ED8; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">1</div><div style="flex: 1; font-size: 12px; font-weight: 600; color: #FFFFFF;">Builder</div><div style="font-size: 10px; color: #BFDBFE; font-family: Consolas, monospace;">NOW</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">2</div><div style="flex: 1; font-size: 12px; color: #CBD5E1;">Chain</div><div style="font-size: 10px; color: #64748B; font-family: Consolas, monospace;">READY</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">3</div><div style="flex: 1; font-size: 12px; color: #64748B;">Optimize</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">4</div><div style="flex: 1; font-size: 12px; color: #64748B;">Force field</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">5</div><div style="flex: 1; font-size: 12px; color: #64748B;">Box</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">6</div><div style="flex: 1; font-size: 12px; color: #64748B;">Export</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 1px; background: #1E293B; margin: 12px 0;"></div>
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Tools</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Reactions</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">System builder</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Blend</div>
+          <div style="flex: 1;"></div>
+          <div style="margin: 0 14px; padding: 10px; background: #16233A; border: 1px solid #1E3A5F; border-radius: 6px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="font-size: 11px; color: #94A3B8;">Pipeline progress</div>
+            <div style="height: 4px; background: #0B1626; border-radius: 2px; overflow: hidden;"><div style="width: 17%; height: 100%; background: #3B82F6;"></div></div>
+            <div style="font-size: 11px; color: #64748B; font-family: Consolas, monospace;">1 of 6 complete</div>
+          </div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+
+          <div style="background: #FFFFFF; border-bottom: 1px solid #E2E8F0; padding: 14px 20px 0; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 11px; color: #64748B;"><span>Pipeline</span><span style="color: #CBD5E1;">›</span><span>Step 1 · Builder</span><span style="color: #CBD5E1;">›</span><span style="color: #0F172A; font-weight: 600;">Reaction scheme</span></div>
+            <div style="display: flex; flex-direction: row; align-items: flex-end; gap: 12px;">
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">
+                <div style="font-size: 20px; font-weight: 600; letter-spacing: -0.01em;">Builder</div>
+                <div style="font-size: 12px; color: #475569;">Define the monomer or reaction that everything downstream is built from.</div>
+              </div>
+              <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #15803D; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 5px; margin-bottom: 4px;"><span>✓</span><span>Reaction validated</span></div>
+            </div>
+            <div style="display: flex; flex-direction: row;">
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; border-bottom: 2px solid transparent; display: flex; align-items: center;">File upload</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; border-bottom: 2px solid transparent; display: flex; align-items: center;">SMILES</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; border-bottom: 2px solid transparent; display: flex; align-items: center;">Periodic builder</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; font-weight: 600; color: #1D4ED8; border-bottom: 2px solid #2563EB; display: flex; align-items: center;">Reaction scheme</div>
+            </div>
+          </div>
+
+          <div style="flex: 1; padding: 20px; display: flex; flex-direction: row; gap: 16px; min-height: 0; overflow: hidden;">
+
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0;">
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Reactants</div>
+                  <div style="font-size: 11px; color: #94A3B8;">2 molecules</div>
+                  <div style="flex: 1;"></div>
+                  <div style="height: 22px; padding: 0 10px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 11px; display: flex; align-items: center; gap: 5px;"><span style="color: #1D4ED8; font-weight: 700;">+</span>Add molecule</div>
+                </div>
+                <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+                  <div style="display: flex; flex-direction: row; gap: 8px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">
+                    <div style="width: 20px;"></div><div style="width: 150px;">name</div><div style="flex: 1;">SMILES with atom maps</div><div style="width: 66px;">maps</div><div style="width: 24px;"></div>
+                  </div>
+                  <div style="display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                    <div style="width: 20px; font-family: Consolas, monospace; font-size: 11px; color: #94A3B8; text-align: center;">1</div>
+                    <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center;">lactic acid</div>
+                    <div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; display: flex; align-items: center;">C<span>[C@@H]</span>(O)<span>C(=O)</span><span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[OH:1]</span></div>
+                    <div style="width: 66px; display: flex; flex-direction: row; gap: 3px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center;">1</span></div>
+                    <div style="width: 24px; height: 24px; border: 1px solid #E2E8F0; border-radius: 3px; color: #94A3B8; font-size: 12px; display: flex; align-items: center; justify-content: center;">✕</div>
+                  </div>
+                  <div style="display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                    <div style="width: 20px; font-family: Consolas, monospace; font-size: 11px; color: #94A3B8; text-align: center;">2</div>
+                    <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center;">glycolic acid</div>
+                    <div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; display: flex; align-items: center;"><span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[O:2]</span>C<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[C:3]</span>(=O)O</div>
+                    <div style="width: 66px; display: flex; flex-direction: row; gap: 3px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center;">2</span><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center;">3</span></div>
+                    <div style="width: 24px; height: 24px; border: 1px solid #E2E8F0; border-radius: 3px; color: #94A3B8; font-size: 12px; display: flex; align-items: center; justify-content: center;">✕</div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display: flex; flex-direction: row; align-items: center; gap: 10px; padding: 0 4px;">
+                <div style="flex: 1; height: 1px; background: #E2E8F0;"></div>
+                <div style="height: 22px; padding: 0 12px; border-radius: 11px; background: #FFFFFF; border: 1px solid #CBD5E1; display: flex; flex-direction: row; align-items: center; gap: 8px;">
+                  <span style="font-family: Consolas, monospace; font-size: 13px; color: #0F172A;">→</span>
+                  <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #475569;">reacts to form</span>
+                </div>
+                <div style="flex: 1; height: 1px; background: #E2E8F0;"></div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Product</div>
+                  <div style="font-size: 11px; color: #94A3B8;">one molecule, reusing the same map numbers</div>
+                </div>
+                <div style="padding: 12px 14px; display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                  <div style="width: 20px;"></div>
+                  <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center;">lactyl-glycolate</div>
+                  <div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; display: flex; align-items: center;">C[C@@H](O)C(=O)<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[O:2]</span>C<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[C:3]</span>(=O)O</div>
+                  <div style="width: 66px; display: flex; flex-direction: row; gap: 3px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center;">2</span><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center;">3</span></div>
+                  <div style="width: 24px;"></div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #A7F3D0; border-radius: 6px;">
+                <div style="height: 34px; background: #ECFDF5; border-bottom: 1px solid #A7F3D0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-size: 12px; font-weight: 600; color: #15803D; display: flex; flex-direction: row; align-items: center; gap: 6px;"><span>✓</span><span>Reaction is valid</span></div>
+                  <div style="font-size: 11px; color: #166534;">1 bond formed · 2 bonds broken · 3 atoms deleted · validated 12:41:08</div>
+                  <div style="flex: 1;"></div>
+                  <div style="font-size: 11px; color: #15803D; font-family: Consolas, monospace;">Copy report</div>
+                </div>
+                <div style="display: flex; flex-direction: row;">
+                  <div style="flex: 1; padding: 12px 14px; border-right: 1px solid #E2E8F0; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; flex-direction: row; align-items: center; gap: 6px;"><span style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #15803D;">Bonds formed</span><span style="height: 16px; min-width: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #15803D; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">1</span></div>
+                    <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; height: 24px; padding: 0 8px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><span style="color: #15803D; font-size: 11px;">＋</span><span style="font-family: Consolas, monospace; font-size: 12px; color: #0F766E;">C:3</span><span style="font-family: Consolas, monospace; color: #64748B;">—</span><span style="font-family: Consolas, monospace; font-size: 12px; color: #0F766E;">O:2</span><span style="flex: 1;"></span><span style="font-size: 11px; color: #64748B;">single, ester</span></div>
+                    <div style="height: 1px; background: #F1F5F9;"></div>
+                    <div style="display: flex; flex-direction: row; align-items: center; gap: 6px;"><span style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #B91C1C;">Bonds broken</span><span style="height: 16px; min-width: 16px; padding: 0 5px; border-radius: 8px; background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">2</span></div>
+                    <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; height: 24px; padding: 0 8px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><span style="color: #B91C1C; font-size: 11px;">−</span><span style="font-family: Consolas, monospace; font-size: 12px; color: #0F766E;">C:4</span><span style="font-family: Consolas, monospace; color: #64748B;">—</span><span style="font-family: Consolas, monospace; font-size: 12px; color: #0F766E;">O:1</span><span style="flex: 1;"></span><span style="font-size: 11px; color: #64748B;">acid C–OH</span></div>
+                    <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; height: 24px; padding: 0 8px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><span style="color: #B91C1C; font-size: 11px;">−</span><span style="font-family: Consolas, monospace; font-size: 12px; color: #0F766E;">O:2</span><span style="font-family: Consolas, monospace; color: #64748B;">—</span><span style="font-family: Consolas, monospace; font-size: 12px; color: #475569;">H (implicit)</span><span style="flex: 1;"></span><span style="font-size: 11px; color: #64748B;">alcohol O–H</span></div>
+                  </div>
+                  <div style="flex: 1; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+                    <div style="display: flex; flex-direction: row; align-items: center; gap: 6px;"><span style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #475569;">Atoms deleted · leaving group</span><span style="height: 16px; min-width: 16px; padding: 0 5px; border-radius: 8px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #475569; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">3</span></div>
+                    <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; height: 24px; padding: 0 8px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><span style="font-family: Consolas, monospace; font-size: 12px; color: #0F766E;">O:1</span><span style="font-size: 11px; color: #475569;">+ 2 H</span><span style="flex: 1;"></span><span style="font-size: 11px; color: #64748B;">released as H₂O</span></div>
+                    <div style="height: 1px; background: #F1F5F9;"></div>
+                    <div style="display: flex; flex-direction: row; align-items: center; gap: 6px;"><span style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #475569;">Atoms added</span><span style="height: 16px; min-width: 16px; padding: 0 5px; border-radius: 8px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #475569; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">0</span></div>
+                    <div style="font-size: 11px; color: #94A3B8; padding: 2px 0;">None — every product atom traces to a reactant.</div>
+                    <div style="height: 1px; background: #F1F5F9;"></div>
+                    <div style="display: flex; flex-direction: row; align-items: flex-start; gap: 8px; padding: 8px; background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 3px;">
+                      <span style="color: #92400E; font-weight: 700; font-size: 11px;">!</span>
+                      <div style="flex: 1; font-size: 11px; color: #713F12; line-height: 1.5;"><b>1 warning · </b>Stereocentre <span style="font-family: Consolas, monospace;">[C@@H]</span> is unmapped, so chirality is not tracked through the reaction. Map it if the product must stay isotactic.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Reaction library</div>
+                  <div style="font-size: 11px; color: #94A3B8;">3 reactions · reactions/pla-set.json</div>
+                  <div style="flex: 1;"></div>
+                  <div style="height: 22px; padding: 0 10px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 11px; display: flex; align-items: center;">Save library</div>
+                </div>
+                <div>
+                  <div style="height: 26px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #64748B;">
+                    <div style="width: 150px;">name</div><div style="flex: 1;">reactants</div><div style="flex: 1;">product</div><div style="width: 70px; text-align: right;">formed</div><div style="width: 70px; text-align: right;">broken</div><div style="width: 90px; text-align: center;">status</div><div style="width: 32px;"></div>
+                  </div>
+                  <sc-for list="{{ library }}" as="r" hint-placeholder-count="3">
+                    <div style="height: 28px; border-bottom: 1px solid #F1F5F9; display: flex; flex-direction: row; align-items: center; padding: 0 14px; font-size: 12px;" style-hover="background: #F8FAFC;">
+                      <div style="width: 150px; font-weight: 600;">{{ r.name }}</div>
+                      <div style="flex: 1; font-family: Consolas, monospace; font-size: 11px; color: #475569; overflow: hidden; white-space: nowrap;">{{ r.reactants }}</div>
+                      <div style="flex: 1; font-family: Consolas, monospace; font-size: 11px; color: #475569; overflow: hidden; white-space: nowrap;">{{ r.product }}</div>
+                      <div style="width: 70px; text-align: right; font-family: Consolas, monospace; color: #15803D;">{{ r.formed }}</div>
+                      <div style="width: 70px; text-align: right; font-family: Consolas, monospace; color: #B91C1C;">{{ r.broken }}</div>
+                      <div style="width: 90px; display: flex; justify-content: center;"><span style="height: 16px; padding: 0 7px; border-radius: 8px; background: #ECFDF5; border: 1px solid #A7F3D0; color: #15803D; font-size: 10px; font-weight: 600; display: flex; align-items: center; gap: 4px;">✓ ok</span></div>
+                      <div style="width: 32px; text-align: right; color: #94A3B8;">✕</div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+
+            <div style="width: 340px; display: flex; flex-direction: column; gap: 14px;">
+
+              <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 12px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Map numbers in use</div>
+                  <div style="flex: 1;"></div>
+                  <div style="font-size: 11px; color: #15803D; font-weight: 600;">2 paired</div>
+                </div>
+                <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;">
+                  <div style="display: flex; flex-direction: row; padding: 0 2px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;"><div style="width: 44px;">map</div><div style="flex: 1;">reactant</div><div style="flex: 1;">product</div><div style="width: 70px; text-align: right;">state</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; padding: 0 6px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><div style="width: 40px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: inline-flex; align-items: center;">:1</span></div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">OH</div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px; color: #94A3B8;">absent</div><div style="width: 76px; text-align: right; font-size: 11px; color: #713F12;">leaves</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; padding: 0 6px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><div style="width: 40px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: inline-flex; align-items: center;">:2</span></div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">O</div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">O</div><div style="width: 76px; text-align: right; font-size: 11px; color: #15803D;">✓ paired</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; padding: 0 6px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><div style="width: 40px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: inline-flex; align-items: center;">:3</span></div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">C</div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">C</div><div style="width: 76px; text-align: right; font-size: 11px; color: #15803D;">✓ paired</div></div>
+                  <div style="font-size: 11px; color: #64748B; line-height: 1.5; padding-top: 2px;">Next free number: <span style="font-family: Consolas, monospace; color: #0F172A;">4</span></div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 12px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">How atom maps work</div>
+                </div>
+                <div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+                  <div style="font-size: 12px; color: #475569; line-height: 1.55;">A map number tags one atom so PAAF can follow it. Same number on both sides = same atom.</div>
+                  <div style="background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 6px;">
+                    <div style="font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">worked example</div>
+                    <div style="display: flex; flex-direction: row; gap: 6px; align-items: baseline;"><div style="width: 52px; font-size: 11px; color: #64748B;">acid</div><div style="font-family: Consolas, monospace; font-size: 12px;">CC(=O)<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[OH:1]</span></div></div>
+                    <div style="display: flex; flex-direction: row; gap: 6px; align-items: baseline;"><div style="width: 52px; font-size: 11px; color: #64748B;">alcohol</div><div style="font-family: Consolas, monospace; font-size: 12px;"><span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[C:2]</span>CO</div></div>
+                    <div style="display: flex; flex-direction: row; gap: 6px; align-items: baseline;"><div style="width: 52px; font-size: 11px; color: #64748B;">product</div><div style="font-family: Consolas, monospace; font-size: 12px;">CC(=O)O<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[C:2]</span></div></div>
+                  </div>
+                  <div style="font-size: 11px; color: #475569; line-height: 1.5;">1 · Map only atoms whose bonds change.<br>2 · Numbers unique per side.<br>3 · Missing from product = leaving group.</div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 12px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Run log</div>
+                </div>
+                <div style="padding: 8px 12px; font-family: Consolas, 'DejaVu Sans Mono', monospace; font-size: 11px; line-height: 1.7; color: #475569;">
+                  <div>12:41:07 parse reactant 1 … ok</div>
+                  <div>12:41:07 parse reactant 2 … ok</div>
+                  <div>12:41:08 parse product … ok</div>
+                  <div><span style="color: #92400E;">12:41:08 warn</span> unmapped stereocentre</div>
+                  <div><span style="color: #15803D;">12:41:08 done</span> 1 formed, 2 broken</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="height: 48px; background: #FFFFFF; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 10px;">
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; border: 1px solid #CBD5E1; background: #FFFFFF; font-size: 12px; display: flex; align-items: center;">‹ Back</div>
+            <div style="flex: 1; font-size: 11px; color: #15803D;">✓ Reaction valid — add it to the library or continue to Chain.</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 12px; display: flex; align-items: center;">Re-validate</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 12px; display: flex; align-items: center;">Add to library</div>
+            <div style="width: 1px; height: 22px; background: #E2E8F0;"></div>
+            <div style="height: 26px; padding: 0 14px; border-radius: 3px; background: #2563EB; border: 1px solid #1D4ED8; color: #FFFFFF; font-size: 12px; font-weight: 600; display: flex; align-items: center;" style-hover="background: #1D4ED8;">Next: Chain ›</div>
+          </div>
+
+          <div style="height: 24px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 14px; font-size: 11px; color: #64748B;">
+            <div style="display: flex; flex-direction: row; align-items: center; gap: 5px;"><div style="width: 6px; height: 6px; border-radius: 3px; background: #16A34A;"></div>RDKit 2024.03 · OpenBabel 3.1.1</div>
+            <div style="width: 1px; height: 12px; background: #E2E8F0;"></div>
+            <div>Validated lactyl-glycolate · 12:41:08</div>
+            <div style="flex: 1;"></div>
+            <div style="font-family: Consolas, monospace;">Log (5)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 24px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B; border-bottom: 1px solid #CBD5E1; padding-bottom: 8px; width: 1440px;">4 · Reaction scheme — validation error</div>
+
+    <div id="scr-error" style="width: 1440px; height: 806px; background: #F1F5F9; border: 1px solid #94A3B8; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="height: 40px; background: #0F1B2D; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 12px;">
+        <div style="font-size: 12px; font-weight: 600; color: #FFFFFF;">PAAF</div>
+        <div style="width: 1px; height: 18px; background: #334155;"></div>
+        <div style="font-size: 12px; color: #CBD5E1;">PLA-crosslink-study.paaf</div>
+        <div style="flex: 1;"></div>
+        <div style="font-size: 11px; color: #94A3B8;">Step 1 of 6 · Builder</div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: row; min-height: 0;">
+        <div style="width: 232px; background: #0F1B2D; display: flex; flex-direction: column; padding: 12px 0;">
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Pipeline</div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 10px; background: #1D4ED8; border-left: 3px solid #60A5FA;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #FFFFFF; color: #1D4ED8; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">1</div><div style="flex: 1; font-size: 12px; font-weight: 600; color: #FFFFFF;">Builder</div><div style="width: 16px; height: 16px; border-radius: 8px; background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✕</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">2</div><div style="flex: 1; font-size: 12px; color: #64748B;">Chain</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">3</div><div style="flex: 1; font-size: 12px; color: #64748B;">Optimize</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">4</div><div style="flex: 1; font-size: 12px; color: #64748B;">Force field</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">5</div><div style="flex: 1; font-size: 12px; color: #64748B;">Box</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">6</div><div style="flex: 1; font-size: 12px; color: #64748B;">Export</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 1px; background: #1E293B; margin: 12px 0;"></div>
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Tools</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Reactions</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">System builder</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Blend</div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+          <div style="background: #FFFFFF; border-bottom: 1px solid #E2E8F0; padding: 14px 20px 0; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 11px; color: #64748B;"><span>Pipeline</span><span style="color: #CBD5E1;">›</span><span>Step 1 · Builder</span><span style="color: #CBD5E1;">›</span><span style="color: #0F172A; font-weight: 600;">Reaction scheme</span></div>
+            <div style="display: flex; flex-direction: row; align-items: flex-end; gap: 12px;">
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 3px;">
+                <div style="font-size: 20px; font-weight: 600;">Builder</div>
+                <div style="font-size: 12px; color: #475569;">Define the monomer or reaction that everything downstream is built from.</div>
+              </div>
+              <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 5px; margin-bottom: 4px;"><span>✕</span><span>2 errors · 1 warning</span></div>
+            </div>
+            <div style="display: flex; flex-direction: row;">
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; display: flex; align-items: center;">File upload</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; display: flex; align-items: center;">SMILES</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; color: #64748B; display: flex; align-items: center;">Periodic builder</div>
+              <div style="height: 32px; padding: 0 14px; font-size: 12px; font-weight: 600; color: #1D4ED8; border-bottom: 2px solid #2563EB; display: flex; align-items: center; gap: 6px;">Reaction scheme <span style="width: 14px; height: 14px; border-radius: 7px; background: #FEF2F2; border: 1px solid #FCA5A5; color: #B91C1C; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center;">2</span></div>
+            </div>
+          </div>
+
+          <div style="flex: 1; padding: 20px; display: flex; flex-direction: row; gap: 16px; min-height: 0; overflow: hidden;">
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0;">
+
+              <div style="background: #FEF2F2; border: 1px solid #DC2626; border-radius: 6px; padding: 12px 14px; display: flex; flex-direction: row; gap: 12px;">
+                <div style="width: 20px; height: 20px; border-radius: 10px; background: #DC2626; color: #FFFFFF; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✕</div>
+                <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+                  <div style="font-size: 13px; font-weight: 600; color: #991B1B;">Validation failed — 2 errors must be fixed</div>
+                  <div style="display: flex; flex-direction: column; gap: 6px;">
+                    <div style="background: #FFFFFF; border: 1px solid #FCA5A5; border-radius: 3px; padding: 8px 10px; display: flex; flex-direction: row; gap: 10px; align-items: flex-start;">
+                      <span style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; color: #B91C1C; letter-spacing: 0.06em; width: 62px; padding-top: 1px;">E-MAP-01</span>
+                      <div style="flex: 1; font-size: 12px; color: #0F172A; line-height: 1.5;">Map number <span style="font-family: Consolas, monospace; background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 3px; padding: 0 4px; color: #B91C1C;">:3</span> appears on reactant 2 but not on the product. If atom <span style="font-family: Consolas, monospace;">C:3</span> is meant to leave, remove its map; otherwise add <span style="font-family: Consolas, monospace;">[C:3]</span> to the product.<div style="padding-top: 4px; display: flex; flex-direction: row; gap: 8px;"><span style="font-size: 11px; color: #1D4ED8; font-weight: 600;">Go to reactant 2</span><span style="font-size: 11px; color: #1D4ED8; font-weight: 600;">Insert [C:3] in product</span></div></div>
+                    </div>
+                    <div style="background: #FFFFFF; border: 1px solid #FCA5A5; border-radius: 3px; padding: 8px 10px; display: flex; flex-direction: row; gap: 10px; align-items: flex-start;">
+                      <span style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; color: #B91C1C; letter-spacing: 0.06em; width: 62px; padding-top: 1px;">E-SMI-04</span>
+                      <div style="flex: 1; font-size: 12px; color: #0F172A; line-height: 1.5;">Invalid SMILES in reactant 1 at character 11 — unclosed ring bond <span style="font-family: Consolas, monospace;">1</span>. RDKit: <span style="font-family: Consolas, monospace; color: #475569;">SMILES Parse Error: unclosed ring for input C[C@@H](O)C1(=O)[OH:1]</span></div>
+                    </div>
+                    <div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 3px; padding: 8px 10px; display: flex; flex-direction: row; gap: 10px; align-items: flex-start;">
+                      <span style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; color: #92400E; letter-spacing: 0.06em; width: 62px; padding-top: 1px;">W-BND-02</span>
+                      <div style="flex: 1; font-size: 12px; color: #713F12; line-height: 1.5;">No bonds formed with the current maps. Check that at least two surviving map numbers become adjacent in the product.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Reactants</div>
+                  <div style="font-size: 11px; color: #B91C1C; font-weight: 600;">1 of 2 invalid</div>
+                  <div style="flex: 1;"></div>
+                  <div style="height: 22px; padding: 0 10px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 11px; display: flex; align-items: center; gap: 5px;"><span style="color: #1D4ED8; font-weight: 700;">+</span>Add molecule</div>
+                </div>
+                <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+                  <div style="display: flex; flex-direction: row; gap: 8px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;">
+                    <div style="width: 20px;"></div><div style="width: 150px;">name</div><div style="flex: 1;">SMILES with atom maps</div><div style="width: 66px;">maps</div><div style="width: 24px;"></div>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                      <div style="width: 20px; text-align: center; color: #B91C1C; font-weight: 700; font-size: 12px;">✕</div>
+                      <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center;">lactic acid</div>
+                      <div style="flex: 1; height: 26px; border: 1px solid #DC2626; border-radius: 3px; background: #FEF2F2; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; display: flex; align-items: center;">C[C@@H](O)C<span style="background: #FEE2E2; border-bottom: 2px solid #DC2626; color: #991B1B;">1</span>(=O)<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[OH:1]</span></div>
+                      <div style="width: 66px; display: flex; flex-direction: row; gap: 3px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center;">1</span></div>
+                      <div style="width: 24px; height: 24px; border: 1px solid #E2E8F0; border-radius: 3px; color: #94A3B8; font-size: 12px; display: flex; align-items: center; justify-content: center;">✕</div>
+                    </div>
+                    <div style="display: flex; flex-direction: row; gap: 8px; padding-left: 28px;"><div style="width: 150px;"></div><div style="flex: 1; font-size: 11px; color: #B91C1C;">E-SMI-04 · unclosed ring bond 1 at char 11</div></div>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: 4px;">
+                    <div style="display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                      <div style="width: 20px; text-align: center; font-family: Consolas, monospace; font-size: 11px; color: #94A3B8;">2</div>
+                      <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center;">glycolic acid</div>
+                      <div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; display: flex; align-items: center;"><span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[O:2]</span>C<span style="background: #FFFBEB; border: 1px solid #FBBF24; border-radius: 3px; padding: 0 3px; color: #92400E;">[C:3]</span>(=O)O</div>
+                      <div style="width: 66px; display: flex; flex-direction: row; gap: 3px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center;">2</span><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #FFFBEB; border: 1px solid #FBBF24; color: #92400E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center; gap: 2px;">3 !</span></div>
+                      <div style="width: 24px; height: 24px; border: 1px solid #E2E8F0; border-radius: 3px; color: #94A3B8; font-size: 12px; display: flex; align-items: center; justify-content: center;">✕</div>
+                    </div>
+                    <div style="display: flex; flex-direction: row; gap: 8px; padding-left: 28px;"><div style="width: 150px;"></div><div style="flex: 1; font-size: 11px; color: #92400E;">E-MAP-01 · map :3 has no match in the product</div></div>
+                  </div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Product</div>
+                  <div style="font-size: 11px; color: #94A3B8;">parses, but is missing map :3</div>
+                </div>
+                <div style="padding: 12px 14px; display: flex; flex-direction: row; gap: 8px; align-items: center;">
+                  <div style="width: 20px;"></div>
+                  <div style="width: 150px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center;">lactyl-glycolate</div>
+                  <div style="flex: 1; height: 26px; border: 1px solid #FBBF24; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; display: flex; align-items: center;">C[C@@H](O)C(=O)<span style="background: #ECFDF5; border: 1px solid #99E3D4; border-radius: 3px; padding: 0 3px; color: #0F766E;">[O:2]</span>CC(=O)O</div>
+                  <div style="width: 66px; display: flex; flex-direction: row; gap: 3px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: flex; align-items: center;">2</span></div>
+                  <div style="width: 24px;"></div>
+                </div>
+              </div>
+            </div>
+
+            <div style="width: 340px; display: flex; flex-direction: column; gap: 14px;">
+              <div style="background: #FFFFFF; border: 1px solid #DC2626; border-radius: 6px;">
+                <div style="height: 34px; background: #FEF2F2; border-bottom: 1px solid #FCA5A5; display: flex; align-items: center; padding: 0 12px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #991B1B;">Map numbers in use</div>
+                  <div style="flex: 1;"></div>
+                  <div style="font-size: 11px; color: #B91C1C; font-weight: 600;">1 unmatched</div>
+                </div>
+                <div style="padding: 10px 12px; display: flex; flex-direction: column; gap: 6px;">
+                  <div style="display: flex; flex-direction: row; padding: 0 2px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #94A3B8;"><div style="width: 44px;">map</div><div style="flex: 1;">reactant</div><div style="flex: 1;">product</div><div style="width: 76px; text-align: right;">state</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; padding: 0 6px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><div style="width: 40px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: inline-flex; align-items: center;">:1</span></div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">OH</div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px; color: #94A3B8;">absent</div><div style="width: 76px; text-align: right; font-size: 11px; color: #713F12;">leaves</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; padding: 0 6px; background: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 3px;"><div style="width: 40px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #ECFDF5; border: 1px solid #99E3D4; color: #0F766E; font-family: Consolas, monospace; font-size: 10px; display: inline-flex; align-items: center;">:2</span></div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">O</div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">O</div><div style="width: 76px; text-align: right; font-size: 11px; color: #15803D;">✓ paired</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; padding: 0 6px; background: #FEF2F2; border: 1px solid #FCA5A5; border-radius: 3px;"><div style="width: 40px;"><span style="height: 16px; padding: 0 5px; border-radius: 8px; background: #FFFFFF; border: 1px solid #FCA5A5; color: #B91C1C; font-family: Consolas, monospace; font-size: 10px; display: inline-flex; align-items: center;">:3</span></div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px;">C</div><div style="flex: 1; font-family: Consolas, monospace; font-size: 11px; color: #B91C1C;">missing</div><div style="width: 76px; text-align: right; font-size: 11px; font-weight: 600; color: #B91C1C;">✕ unmatched</div></div>
+                  <div style="font-size: 11px; color: #64748B; line-height: 1.5; padding-top: 2px;">Unmatched maps are listed with an ✕ and a border, not colour alone.</div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 12px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Run log</div>
+                </div>
+                <div style="padding: 8px 12px; font-family: Consolas, 'DejaVu Sans Mono', monospace; font-size: 11px; line-height: 1.7; color: #475569;">
+                  <div><span style="color: #B91C1C;">12:52:41 error</span> reactant 1 parse failed</div>
+                  <div>12:52:41 parse reactant 2 … ok</div>
+                  <div>12:52:41 parse product … ok</div>
+                  <div><span style="color: #B91C1C;">12:52:41 error</span> map :3 unmatched</div>
+                  <div><span style="color: #92400E;">12:52:41 warn</span> 0 bonds formed</div>
+                  <div>12:52:41 aborted — nothing written</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="height: 48px; background: #FFFFFF; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 10px;">
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; border: 1px solid #CBD5E1; background: #FFFFFF; font-size: 12px; display: flex; align-items: center;">‹ Back</div>
+            <div style="flex: 1; font-size: 11px; color: #B91C1C; font-weight: 600;">✕ Fix 2 errors to validate. Nothing has been written to disk.</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #94A3B8; font-size: 12px; display: flex; align-items: center;">Add to library</div>
+            <div style="height: 26px; padding: 0 14px; border-radius: 3px; background: #2563EB; border: 1px solid #1D4ED8; color: #FFFFFF; font-size: 12px; font-weight: 600; display: flex; align-items: center;">Validate reaction</div>
+          </div>
+          <div style="height: 24px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 14px; font-size: 11px; color: #64748B;">
+            <div style="display: flex; flex-direction: row; align-items: center; gap: 5px;"><div style="width: 6px; height: 6px; border-radius: 3px; background: #DC2626;"></div>Validation failed · 2 errors</div>
+            <div style="flex: 1;"></div>
+            <div style="font-family: Consolas, monospace;">Log (6)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 24px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B; border-bottom: 1px solid #CBD5E1; padding-bottom: 8px; width: 1440px;">5 · Step 4 · Force field — form + dense atom table</div>
+
+    <div id="scr-ff" style="width: 1440px; height: 842px; background: #F1F5F9; border: 1px solid #94A3B8; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="height: 40px; background: #0F1B2D; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 12px;">
+        <div style="font-size: 12px; font-weight: 600; color: #FFFFFF;">PAAF</div>
+        <div style="width: 1px; height: 18px; background: #334155;"></div>
+        <div style="font-size: 12px; color: #CBD5E1;">PLA-crosslink-study.paaf</div>
+        <div style="flex: 1;"></div>
+        <div style="font-size: 11px; color: #94A3B8;">Step 4 of 6 · Force field</div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: row; min-height: 0;">
+        <div style="width: 232px; background: #0F1B2D; display: flex; flex-direction: column; padding: 12px 0;">
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Pipeline</div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #14532D; border: 1px solid #16A34A; color: #A7F3D0; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✓</div><div style="flex: 1; font-size: 12px; color: #CBD5E1;">Builder</div><div style="font-size: 10px; color: #64748B; font-family: Consolas, monospace;">done</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #14532D; border: 1px solid #16A34A; color: #A7F3D0; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✓</div><div style="flex: 1; font-size: 12px; color: #CBD5E1;">Chain</div><div style="font-size: 10px; color: #64748B; font-family: Consolas, monospace;">n=50</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #14532D; border: 1px solid #16A34A; color: #A7F3D0; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✓</div><div style="flex: 1; font-size: 12px; color: #CBD5E1;">Optimize</div><div style="font-size: 10px; color: #64748B; font-family: Consolas, monospace;">MMFF94</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 10px; background: #1D4ED8; border-left: 3px solid #60A5FA;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #FFFFFF; color: #1D4ED8; font-size: 10px; font-weight: 700; display: flex; align-items: center; justify-content: center;">4</div><div style="flex: 1; font-size: 12px; font-weight: 600; color: #FFFFFF;">Force field</div><div style="font-size: 10px; color: #BFDBFE; font-family: Consolas, monospace;">NOW</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">5</div><div style="flex: 1; font-size: 12px; color: #64748B;">Box</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">6</div><div style="flex: 1; font-size: 12px; color: #64748B;">Export</div><div style="font-size: 10px; color: #475569;">locked</div></div>
+          <div style="height: 1px; background: #1E293B; margin: 12px 0;"></div>
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Tools</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Reactions</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">System builder</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Blend</div>
+          <div style="flex: 1;"></div>
+          <div style="margin: 0 14px; padding: 10px; background: #16233A; border: 1px solid #1E3A5F; border-radius: 6px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="font-size: 11px; color: #94A3B8;">Pipeline progress</div>
+            <div style="height: 4px; background: #0B1626; border-radius: 2px; overflow: hidden;"><div style="width: 58%; height: 100%; background: #3B82F6;"></div></div>
+            <div style="font-size: 11px; color: #64748B; font-family: Consolas, monospace;">3 of 6 complete</div>
+          </div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+          <div style="background: #FFFFFF; border-bottom: 1px solid #E2E8F0; padding: 14px 20px 12px; display: flex; flex-direction: row; align-items: flex-end; gap: 12px;">
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+              <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 11px; color: #64748B;"><span>Pipeline</span><span style="color: #CBD5E1;">›</span><span style="color: #0F172A; font-weight: 600;">Step 4 · Force field</span></div>
+              <div style="font-size: 20px; font-weight: 600;">Force field</div>
+              <div style="font-size: 12px; color: #475569;">Assign types and charges to all 1 248 atoms of the optimized chain.</div>
+            </div>
+            <div style="display: flex; flex-direction: row; gap: 8px; align-items: center; margin-bottom: 2px;">
+              <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 5px;"><span>!</span><span>12 atoms untyped</span></div>
+              <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 12px; display: flex; align-items: center;">Manual atom typing…</div>
+            </div>
+          </div>
+
+          <div style="flex: 1; padding: 20px; display: flex; flex-direction: row; gap: 16px; min-height: 0; overflow: hidden;">
+            <div style="width: 340px; display: flex; flex-direction: column; gap: 14px;">
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 14px;"><div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Field selection</div></div>
+                <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 96px; font-size: 12px; color: #475569; text-align: right;">Force field</div><div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;"><span>OPLS-AA</span><span style="color: #64748B; font-size: 10px;">▾</span></div></div>
+                  <div style="display: flex; flex-direction: row; gap: 8px;"><div style="width: 96px;"></div><div style="flex: 1; font-size: 11px; color: #64748B; line-height: 1.5;">Good general coverage for polyesters. GAFF and PCFF are also available; DL_FIELD requires an external install.</div></div>
+                  <div style="height: 1px; background: #F1F5F9; margin: 2px 0;"></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 96px; font-size: 12px; color: #475569; text-align: right;">Typing engine</div><div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;"><span>LigParGen</span><span style="color: #64748B; font-size: 10px;">▾</span></div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 96px; font-size: 12px; color: #475569; text-align: right;">Charge method</div><div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;"><span>CM1A-LBCC</span><span style="color: #64748B; font-size: 10px;">▾</span></div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 96px; font-size: 12px; color: #475569; text-align: right;">Scale 1-4</div><div style="width: 92px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; display: flex; align-items: center;"><span style="flex: 1; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px;">0.500</span><span style="width: 18px; border-left: 1px solid #E2E8F0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 8px; color: #64748B; line-height: 1.1;">▴<br>▾</span></div><div style="flex: 1; font-size: 11px; color: #94A3B8;">OPLS default</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 96px;"></div><div style="flex: 1; display: flex; flex-direction: row; align-items: center; gap: 7px; font-size: 12px; color: #0F172A;"><span style="width: 13px; height: 13px; border: 1px solid #1D4ED8; border-radius: 3px; background: #2563EB; color: #FFFFFF; font-size: 9px; display: flex; align-items: center; justify-content: center;">✓</span>Neutralize net charge</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 96px;"></div><div style="flex: 1; display: flex; flex-direction: row; align-items: center; gap: 7px; font-size: 12px; color: #0F172A;"><span style="width: 13px; height: 13px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF;"></span>Write per-atom comments</div></div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 14px;"><div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Assignment summary</div></div>
+                <div style="padding: 4px 14px 10px;">
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; border-bottom: 1px solid #F1F5F9; font-size: 12px;"><div style="flex: 1; color: #475569;">Atoms typed</div><div style="font-family: Consolas, monospace; color: #0F172A;">1 236 / 1 248</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; border-bottom: 1px solid #F1F5F9; font-size: 12px;"><div style="flex: 1; color: #475569;">Distinct types</div><div style="font-family: Consolas, monospace; color: #0F172A;">14</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; border-bottom: 1px solid #F1F5F9; font-size: 12px;"><div style="flex: 1; color: #475569;">Net charge</div><div style="font-family: Consolas, monospace; color: #0F172A;">+0.0031 e</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; height: 26px; font-size: 12px;"><div style="flex: 1; color: #475569;">Missing params</div><div style="font-family: Consolas, monospace; color: #B91C1C; font-weight: 600;">2 dihedrals</div></div>
+                </div>
+              </div>
+            </div>
+
+            <div style="flex: 1; background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; display: flex; flex-direction: column; min-width: 0;">
+              <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Atom typing</div>
+                <div style="font-size: 11px; color: #94A3B8;">1 248 atoms</div>
+                <div style="flex: 1;"></div>
+                <div style="width: 170px; height: 22px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 11px; color: #94A3B8; display: flex; align-items: center;">Filter by type or element…</div>
+                <div style="height: 22px; padding: 0 10px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 11px; display: flex; align-items: center;">Untyped only</div>
+                <div style="height: 22px; padding: 0 10px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 11px; display: flex; align-items: center;">Export CSV</div>
+              </div>
+              <div style="height: 26px; background: #F8FAFC; border-bottom: 1px solid #CBD5E1; display: flex; flex-direction: row; align-items: center; padding: 0 14px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #64748B;">
+                <div style="width: 52px;">idx</div><div style="width: 46px;">elem</div><div style="width: 90px;">FF type</div><div style="width: 74px; text-align: right;">charge</div><div style="width: 60px; text-align: right;">mass</div><div style="flex: 1;">chemical environment</div><div style="width: 54px; text-align: center;">nbrs</div><div style="width: 84px; text-align: center;">status</div>
+              </div>
+              <div style="flex: 1; overflow: hidden;">
+                <sc-for list="{{ atoms }}" as="a" hint-placeholder-count="18">
+                  <div style="height: 28px; display: flex; flex-direction: row; align-items: center; padding: 0 14px; border-bottom: 1px solid #F1F5F9; font-size: 12px; background: {{ a.bg }};" style-hover="background: #EFF6FF;">
+                    <div style="width: 52px; font-family: Consolas, monospace; color: #94A3B8;">{{ a.idx }}</div>
+                    <div style="width: 46px; font-weight: 600;">{{ a.el }}</div>
+                    <div style="width: 90px; font-family: Consolas, monospace; color: {{ a.typeColor }};">{{ a.type }}</div>
+                    <div style="width: 74px; text-align: right; font-family: Consolas, monospace; color: #0F172A;">{{ a.q }}</div>
+                    <div style="width: 60px; text-align: right; font-family: Consolas, monospace; color: #64748B;">{{ a.m }}</div>
+                    <div style="flex: 1; font-family: Consolas, monospace; font-size: 11px; color: #475569; overflow: hidden; white-space: nowrap;">{{ a.env }}</div>
+                    <div style="width: 54px; text-align: center; font-family: Consolas, monospace; color: #64748B;">{{ a.n }}</div>
+                    <div style="width: 84px; display: flex; justify-content: center;">
+                      <span style="height: 16px; padding: 0 7px; border-radius: 8px; font-size: 10px; font-weight: 600; display: flex; align-items: center; gap: 4px; background: {{ a.badgeBg }}; border: 1px solid {{ a.badgeBorder }}; color: {{ a.badgeFg }};">{{ a.status }}</span>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="height: 30px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 12px; font-size: 11px; color: #64748B;">
+                <div>Showing 1–18 of 1 248</div>
+                <div style="width: 1px; height: 12px; background: #E2E8F0;"></div>
+                <div><span style="color: #B91C1C; font-weight: 600;">12 untyped</span> · 3 low-confidence</div>
+                <div style="flex: 1;"></div>
+                <div style="font-family: Consolas, monospace;">rows 28px · monospaced numerics, right-aligned</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="height: 48px; background: #FFFFFF; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 10px;">
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; border: 1px solid #CBD5E1; background: #FFFFFF; font-size: 12px; display: flex; align-items: center;">‹ Back: Optimize</div>
+            <div style="flex: 1; font-size: 11px; color: #92400E;">! 12 atoms are untyped — resolve them or accept generic types before continuing.</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 12px; display: flex; align-items: center;">Manual atom typing…</div>
+            <div style="height: 26px; padding: 0 14px; border-radius: 3px; background: #2563EB; border: 1px solid #1D4ED8; color: #FFFFFF; font-size: 12px; font-weight: 600; display: flex; align-items: center;">Assign force field</div>
+            <div style="width: 1px; height: 22px; background: #E2E8F0;"></div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #94A3B8; font-size: 12px; display: flex; align-items: center;">Next: Box ›</div>
+          </div>
+          <div style="height: 24px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 14px; font-size: 11px; color: #64748B;">
+            <div style="display: flex; flex-direction: row; align-items: center; gap: 5px;"><div style="width: 6px; height: 6px; border-radius: 3px; background: #D97706;"></div>Typing incomplete</div>
+            <div style="flex: 1;"></div>
+            <div style="font-family: Consolas, monospace;">Log (41)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; gap: 24px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B; border-bottom: 1px solid #CBD5E1; padding-bottom: 8px; width: 1440px;">6 · Tool · Blend</div>
+
+    <div id="scr-blend" style="width: 1440px; height: 760px; background: #F1F5F9; border: 1px solid #94A3B8; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column;">
+      <div style="height: 40px; background: #0F1B2D; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 12px;">
+        <div style="font-size: 12px; font-weight: 600; color: #FFFFFF;">PAAF</div>
+        <div style="width: 1px; height: 18px; background: #334155;"></div>
+        <div style="font-size: 12px; color: #CBD5E1;">PLA-crosslink-study.paaf</div>
+        <div style="flex: 1;"></div>
+        <div style="font-size: 11px; color: #94A3B8;">Tool · Blend</div>
+      </div>
+      <div style="flex: 1; display: flex; flex-direction: row; min-height: 0;">
+        <div style="width: 232px; background: #0F1B2D; display: flex; flex-direction: column; padding: 12px 0;">
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Pipeline</div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #14532D; border: 1px solid #16A34A; color: #A7F3D0; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✓</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Builder</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #14532D; border: 1px solid #16A34A; color: #A7F3D0; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✓</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Chain</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; background: #14532D; border: 1px solid #16A34A; color: #A7F3D0; font-size: 9px; font-weight: 700; display: flex; align-items: center; justify-content: center;">✓</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Optimize</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">4</div><div style="flex: 1; font-size: 12px; color: #94A3B8;">Force field</div><div style="font-size: 10px; color: #92400E; background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 7px; padding: 0 5px;">!</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">5</div><div style="flex: 1; font-size: 12px; color: #64748B;">Box</div></div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px 0 17px; gap: 10px;"><div style="width: 16px; height: 16px; border-radius: 8px; border: 1px solid #475569; color: #94A3B8; font-size: 10px; display: flex; align-items: center; justify-content: center;">6</div><div style="flex: 1; font-size: 12px; color: #64748B;">Export</div></div>
+          <div style="height: 1px; background: #1E293B; margin: 12px 0;"></div>
+          <div style="padding: 0 14px 8px; font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B;">Tools</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">Reactions</div>
+          <div style="height: 30px; display: flex; align-items: center; padding: 0 14px 0 17px; font-size: 12px; color: #CBD5E1;">System builder</div>
+          <div style="height: 30px; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 10px; background: #16233A; border-left: 3px solid #94A3B8;"><div style="flex: 1; font-size: 12px; font-weight: 600; color: #FFFFFF;">Blend</div><div style="font-size: 10px; color: #94A3B8; font-family: Consolas, monospace;">TOOL</div></div>
+          <div style="flex: 1;"></div>
+          <div style="margin: 0 14px; padding: 10px; background: #16233A; border: 1px solid #1E3A5F; border-radius: 6px; font-size: 11px; color: #94A3B8; line-height: 1.5;">Tools run independently of the 6-step pipeline and do not change its state.</div>
+        </div>
+
+        <div style="flex: 1; display: flex; flex-direction: column; min-width: 0;">
+          <div style="background: #FFFFFF; border-bottom: 1px solid #E2E8F0; padding: 14px 20px 12px; display: flex; flex-direction: row; align-items: flex-end; gap: 12px;">
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 5px;">
+              <div style="display: flex; flex-direction: row; align-items: center; gap: 8px; font-size: 11px; color: #64748B;"><span>Tools</span><span style="color: #CBD5E1;">›</span><span style="color: #0F172A; font-weight: 600;">Blend</span></div>
+              <div style="font-size: 20px; font-weight: 600;">Blend</div>
+              <div style="font-size: 12px; color: #475569;">Pack several pre-built chains into one mixed box. Independent of the pipeline.</div>
+            </div>
+            <div style="height: 18px; padding: 0 8px; border-radius: 10px; background: #F1F5F9; border: 1px solid #E2E8F0; color: #475569; font-size: 11px; font-weight: 600; display: flex; align-items: center; margin-bottom: 2px;">Standalone tool</div>
+          </div>
+
+          <div style="flex: 1; padding: 20px; display: flex; flex-direction: row; gap: 16px; min-height: 0; overflow: hidden;">
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 14px; min-width: 0;">
+              <div style="background: #FFFFFF; border: 1px solid #CBD5E1; border-radius: 6px; display: flex; flex-direction: column; min-height: 0;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; gap: 8px;">
+                  <div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Components</div>
+                  <div style="font-size: 11px; color: #94A3B8;">4 chains · fractions must total 100%</div>
+                  <div style="flex: 1;"></div>
+                  <div style="height: 22px; padding: 0 10px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 11px; display: flex; align-items: center; gap: 5px;"><span style="color: #1D4ED8; font-weight: 700;">+</span>Add chain file…</div>
+                </div>
+                <div style="height: 26px; background: #F8FAFC; border-bottom: 1px solid #CBD5E1; display: flex; flex-direction: row; align-items: center; padding: 0 14px; font-family: Consolas, monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: #64748B;">
+                  <div style="width: 150px;">label</div><div style="flex: 1;">file</div><div style="width: 70px; text-align: right;">chains</div><div style="width: 78px; text-align: right;">mass %</div><div style="width: 74px; text-align: right;">MW</div><div style="width: 84px; text-align: center;">FF</div><div style="width: 32px;"></div>
+                </div>
+                <sc-for list="{{ blend }}" as="b" hint-placeholder-count="4">
+                  <div style="height: 28px; display: flex; flex-direction: row; align-items: center; padding: 0 14px; border-bottom: 1px solid #F1F5F9; font-size: 12px;" style-hover="background: #F8FAFC;">
+                    <div style="width: 150px; font-weight: 600;">{{ b.label }}</div>
+                    <div style="flex: 1; font-family: Consolas, monospace; font-size: 11px; color: #475569; overflow: hidden; white-space: nowrap;">{{ b.file }}</div>
+                    <div style="width: 70px; text-align: right; font-family: Consolas, monospace;">{{ b.n }}</div>
+                    <div style="width: 78px; text-align: right; font-family: Consolas, monospace;">{{ b.pct }}</div>
+                    <div style="width: 74px; text-align: right; font-family: Consolas, monospace; color: #64748B;">{{ b.mw }}</div>
+                    <div style="width: 84px; text-align: center; font-family: Consolas, monospace; font-size: 11px; color: #475569;">{{ b.ff }}</div>
+                    <div style="width: 32px; text-align: right; color: #94A3B8;">✕</div>
+                  </div>
+                </sc-for>
+                <div style="height: 30px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 14px; font-size: 11px;">
+                  <div style="width: 150px; font-weight: 600; color: #0F172A;">Total</div>
+                  <div style="flex: 1;"></div>
+                  <div style="width: 70px; text-align: right; font-family: Consolas, monospace; color: #0F172A;">64</div>
+                  <div style="width: 78px; text-align: right; font-family: Consolas, monospace; font-weight: 700; color: #15803D;">100.0</div>
+                  <div style="width: 74px;"></div>
+                  <div style="width: 84px; text-align: center; color: #92400E;">mixed</div>
+                  <div style="width: 32px;"></div>
+                </div>
+              </div>
+
+              <div style="background: #FFFBEB; border: 1px solid #FDE68A; border-radius: 6px; padding: 10px 14px; display: flex; flex-direction: row; gap: 10px; align-items: flex-start;">
+                <span style="color: #92400E; font-weight: 700; font-size: 11px;">!</span>
+                <div style="flex: 1; font-size: 12px; color: #713F12; line-height: 1.5;">Components use two different force fields (OPLS-AA and GAFF). PAAF will export both parameter sets, but mixed-FF systems need manual review of cross terms.</div>
+                <div style="height: 22px; padding: 0 10px; border-radius: 3px; background: #FFFFFF; border: 1px solid #FDE68A; font-size: 11px; color: #92400E; display: flex; align-items: center;">Review cross terms</div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 14px;"><div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Run log</div></div>
+                <div style="padding: 8px 14px; font-family: Consolas, 'DejaVu Sans Mono', monospace; font-size: 11px; line-height: 1.7; color: #475569;">
+                  <div>13:02:11 loaded PLA-50.pdb · 24 chains</div>
+                  <div>13:02:12 loaded PEG-20.pdb · 20 chains</div>
+                  <div><span style="color: #92400E;">13:02:12 warn</span> mixed force fields detected</div>
+                  <div>13:02:12 estimated box 62.4 × 62.4 × 62.4 Å</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="width: 340px; display: flex; flex-direction: column; gap: 14px;">
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 14px;"><div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Box &amp; packing</div></div>
+                <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 84px; font-size: 12px; color: #475569; text-align: right;">Shape</div><div style="flex: 1; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-size: 12px; display: flex; align-items: center; justify-content: space-between;"><span>Cubic</span><span style="color: #64748B; font-size: 10px;">▾</span></div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 84px; font-size: 12px; color: #475569; text-align: right;">Density</div><div style="width: 92px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; display: flex; align-items: center;"><span style="flex: 1; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px;">1.050</span><span style="width: 18px; border-left: 1px solid #E2E8F0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 8px; color: #64748B; line-height: 1.1;">▴<br>▾</span></div><div style="flex: 1; font-size: 11px; color: #64748B;">g/cm³</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 84px; font-size: 12px; color: #475569; text-align: right;">Edge</div><div style="flex: 1; height: 26px; border: 1px solid #E2E8F0; border-radius: 3px; background: #F8FAFC; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; color: #64748B; display: flex; align-items: center; justify-content: space-between;"><span>62.412 Å</span><span style="font-size: 10px;">derived</span></div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 84px; font-size: 12px; color: #475569; text-align: right;">Tolerance</div><div style="width: 92px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; display: flex; align-items: center;"><span style="flex: 1; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px;">2.00</span><span style="width: 18px; border-left: 1px solid #E2E8F0; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 8px; color: #64748B; line-height: 1.1;">▴<br>▾</span></div><div style="flex: 1; font-size: 11px; color: #64748B;">Å min sep</div></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 8px;"><div style="width: 84px; font-size: 12px; color: #475569; text-align: right;">Seed</div><div style="width: 92px; height: 26px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF; padding: 0 8px; font-family: Consolas, monospace; font-size: 12px; display: flex; align-items: center;">17</div><div style="flex: 1; font-size: 11px; color: #64748B;">reproducible</div></div>
+                  <div style="height: 1px; background: #F1F5F9; margin: 2px 0;"></div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 7px; font-size: 12px;"><span style="width: 13px; height: 13px; border: 1px solid #1D4ED8; border-radius: 3px; background: #2563EB; color: #FFFFFF; font-size: 9px; display: flex; align-items: center; justify-content: center;">✓</span>Randomize orientations</div>
+                  <div style="display: flex; flex-direction: row; align-items: center; gap: 7px; font-size: 12px;"><span style="width: 13px; height: 13px; border: 1px solid #CBD5E1; border-radius: 3px; background: #FFFFFF;"></span>Pre-relax after packing</div>
+                </div>
+              </div>
+
+              <div style="background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px;">
+                <div style="height: 34px; background: #F8FAFC; border-bottom: 1px solid #E2E8F0; display: flex; align-items: center; padding: 0 14px;"><div style="font-family: Consolas, monospace; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #475569;">Estimated system</div></div>
+                <div style="padding: 4px 14px 10px;">
+                  <div style="display: flex; flex-direction: row; height: 26px; align-items: center; border-bottom: 1px solid #F1F5F9; font-size: 12px;"><div style="flex: 1; color: #475569;">Total atoms</div><div style="font-family: Consolas, monospace;">41 216</div></div>
+                  <div style="display: flex; flex-direction: row; height: 26px; align-items: center; border-bottom: 1px solid #F1F5F9; font-size: 12px;"><div style="flex: 1; color: #475569;">Total mass</div><div style="font-family: Consolas, monospace;">255 104 g/mol</div></div>
+                  <div style="display: flex; flex-direction: row; height: 26px; align-items: center; border-bottom: 1px solid #F1F5F9; font-size: 12px;"><div style="flex: 1; color: #475569;">Volume</div><div style="font-family: Consolas, monospace;">2.43 × 10⁵ Å³</div></div>
+                  <div style="display: flex; flex-direction: row; height: 26px; align-items: center; font-size: 12px;"><div style="flex: 1; color: #475569;">Packmol time</div><div style="font-family: Consolas, monospace; color: #64748B;">~90 s</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div style="height: 48px; background: #FFFFFF; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 10px;">
+            <div style="flex: 1; font-size: 11px; color: #64748B;">Fractions total 100.0% · 4 components ready to pack.</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 12px; display: flex; align-items: center;">Save preset</div>
+            <div style="height: 26px; padding: 0 12px; border-radius: 3px; background: #FFFFFF; border: 1px solid #CBD5E1; font-size: 12px; display: flex; align-items: center;">Dry run</div>
+            <div style="height: 26px; padding: 0 14px; border-radius: 3px; background: #2563EB; border: 1px solid #1D4ED8; color: #FFFFFF; font-size: 12px; font-weight: 600; display: flex; align-items: center;">Pack blend</div>
+          </div>
+          <div style="height: 24px; background: #F8FAFC; border-top: 1px solid #E2E8F0; display: flex; flex-direction: row; align-items: center; padding: 0 20px; gap: 14px; font-size: 11px; color: #64748B;">
+            <div style="display: flex; flex-direction: row; align-items: center; gap: 5px;"><div style="width: 6px; height: 6px; border-radius: 3px; background: #16A34A;"></div>Packmol 20.14.4 found</div>
+            <div style="flex: 1;"></div>
+            <div style="font-family: Consolas, monospace;">Log (4)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <sc-if value="{{ showAnnotations }}" hint-placeholder-val="{{ true }}">
+  <div style="width: 1440px; display: flex; flex-direction: column; gap: 24px;">
+    <div style="font-size: 13px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #64748B; border-bottom: 1px solid #CBD5E1; padding-bottom: 8px;">7 · Rules for the engineer</div>
+    <div style="display: flex; flex-direction: row; gap: 24px;">
+      <div style="flex: 1; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="font-size: 13px; font-weight: 600;">Layout mapping</div>
+        <div style="font-size: 12px; color: #475569; line-height: 1.6; display: flex; flex-direction: column; gap: 8px;">
+          <div>Every row in these mockups is a <span style="font-family: Consolas, monospace;">QHBoxLayout</span>, every column a <span style="font-family: Consolas, monospace;">QVBoxLayout</span>. Fixed pixel widths (150 name, 66 maps, 24 remove, 340 right rail, 232 sidebar) are <span style="font-family: Consolas, monospace;">setFixedWidth</span>; anything marked flexible is stretch 1.</div>
+          <div>Label/field pairs inside cards are <span style="font-family: Consolas, monospace;">QFormLayout</span> with a right-aligned 84–96px label column. Cards are <span style="font-family: Consolas, monospace;">QGroupBox</span> with a flat title bar drawn as a child widget, not the native title.</div>
+          <div>Tables are <span style="font-family: Consolas, monospace;">QTableView</span> with <span style="font-family: Consolas, monospace;">verticalHeader().setDefaultSectionSize(28)</span>, alternating rows off, a 1px #F1F5F9 grid, sticky header at 26px, numeric columns right-aligned in the mono font.</div>
+          <div>The equation divider ("reacts to form") is a row of two <span style="font-family: Consolas, monospace;">QFrame.HLine</span>s around a centred label — cheap, and it keeps the reactant→product reading order in a narrow window without any absolute positioning.</div>
+          <div>SMILES fields need highlighting, so use a one-line <span style="font-family: Consolas, monospace;">QPlainTextEdit</span> with a <span style="font-family: Consolas, monospace;">QSyntaxHighlighter</span> for <span style="font-family: Consolas, monospace;">\[[^:\]]+:\d+\]</span>, not <span style="font-family: Consolas, monospace;">QLineEdit</span> (which cannot carry rich text). Styled to look identical to the other inputs.</div>
+        </div>
+      </div>
+      <div style="flex: 1; background: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 6px; padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+        <div style="font-size: 13px; font-weight: 600;">Behaviour &amp; accessibility rules</div>
+        <div style="font-size: 12px; color: #475569; line-height: 1.6; display: flex; flex-direction: column; gap: 8px;">
+          <div>State is never colour alone: every status carries a glyph (✓ ! ✕), a word, or a code (<span style="font-family: Consolas, monospace;">E-MAP-01</span>). Error rows also get a left glyph in the index column and a border change.</div>
+          <div>Focus is a 2px #2563EB border with padding reduced 1px, plus a 1px #BFDBFE inner line on tables. Never remove the focus indicator; tab order follows visual order and the action bar is last.</div>
+          <div>Contrast: body #475569 on #FFFFFF is 7.5:1; #64748B captions are 4.8:1 and used at 11px minimum. Never place #94A3B8 on anything but white or #F8FAFC, and never for essential text.</div>
+          <div>Destructive actions (remove row, clear library) are outlined danger, never filled — a filled red button next to a filled blue primary is a misclick risk in a dense action bar.</div>
+          <div>One primary button per screen, always right-most in the 48px action bar, with the blocking condition stated in plain text to its left. Disabled primaries always have that explanation.</div>
+          <div>Validation runs only on explicit action; nothing is written to disk before it passes, and the status bar states so.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showSpec&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;},&quot;showAnnotations&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Sections&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const A = (idx, el, type, q, m, env, n, status) => {
+      const bad = status === "untyped";
+      const low = status === "low conf";
+      return {
+        idx, el, type: type || "—", q, m, env, n, status,
+        bg: bad ? "#FEF2F2" : (low ? "#FFFBEB" : "#FFFFFF"),
+        typeColor: bad ? "#B91C1C" : "#0F172A",
+        badgeBg: bad ? "#FEF2F2" : low ? "#FFFBEB" : "#ECFDF5",
+        badgeBorder: bad ? "#FCA5A5" : low ? "#FDE68A" : "#A7F3D0",
+        badgeFg: bad ? "#B91C1C" : low ? "#92400E" : "#15803D"
+      };
+    };
+    return {
+      showSpec: this.props.showSpec ?? true,
+      showAnnotations: this.props.showAnnotations ?? true,
+      colorTokens: [
+        { name: "bg.page", hex: "#F1F5F9", use: "window / page canvas behind cards" },
+        { name: "bg.surface", hex: "#FFFFFF", use: "cards, inputs, table body" },
+        { name: "bg.sunken", hex: "#F8FAFC", use: "card headers, table header, read-only fields, status bar" },
+        { name: "bg.chrome", hex: "#0F1B2D", use: "sidebar and title bar" },
+        { name: "bg.chrome.raised", hex: "#16233A", use: "progress card / active tool inside sidebar" },
+        { name: "border.default", hex: "#E2E8F0", use: "card and control borders, row separators" },
+        { name: "border.strong", hex: "#CBD5E1", use: "inputs, table outline, emphasised card, dialogs" },
+        { name: "text.primary", hex: "#0F172A", use: "values, labels, headings" },
+        { name: "text.secondary", hex: "#475569", use: "descriptions, form labels, log text" },
+        { name: "text.muted", hex: "#64748B", use: "captions, column headers, status bar" },
+        { name: "text.disabled", hex: "#94A3B8", use: "placeholders, disabled labels — never essential" },
+        { name: "primary", hex: "#2563EB", use: "primary button fill, active tab, focus ring" },
+        { name: "primary.hover", hex: "#1D4ED8", use: "hover fill, links, active sidebar item" },
+        { name: "primary.tint", hex: "#EFF6FF", use: "selected table row, info badge fill" },
+        { name: "success", hex: "#16A34A", use: "success fill / dots" },
+        { name: "success.text", hex: "#15803D", use: "success text and glyphs" },
+        { name: "success.tint", hex: "#ECFDF5", use: "success panel and badge fill" },
+        { name: "warn", hex: "#D97706", use: "warn dots and dividers" },
+        { name: "warn.text", hex: "#92400E", use: "warning text" },
+        { name: "warn.tint", hex: "#FFFBEB", use: "warning panel fill" },
+        { name: "danger", hex: "#DC2626", use: "error borders, error icon fill" },
+        { name: "danger.text", hex: "#B91C1C", use: "error text and codes" },
+        { name: "danger.tint", hex: "#FEF2F2", use: "error panel and invalid input fill" },
+        { name: "map.token", hex: "#0F766E", use: "atom-map token text — new role" },
+        { name: "map.tint", hex: "#ECFDF5", use: "atom-map token fill" }
+      ],
+      library: [
+        { name: "esterification", reactants: "acid + alcohol", product: "ester + H2O", formed: 1, broken: 2 },
+        { name: "lactyl-glycolate", reactants: "lactic + glycolic", product: "lactyl-glycolate", formed: 1, broken: 2 },
+        { name: "epoxy-amine", reactants: "epoxide + amine", product: "beta-amino alcohol", formed: 2, broken: 1 }
+      ],
+      atoms: [
+        A(1, "C", "opls_135", "-0.180", "12.011", "C(H)(H)(H)–C", 4, "typed"),
+        A(2, "H", "opls_140", "+0.060", "1.008", "H–C(sp3)", 1, "typed"),
+        A(3, "H", "opls_140", "+0.060", "1.008", "H–C(sp3)", 1, "typed"),
+        A(4, "H", "opls_140", "+0.060", "1.008", "H–C(sp3)", 1, "typed"),
+        A(5, "C", "opls_157", "+0.205", "12.011", "C(sp3)(O)(H)–C", 4, "typed"),
+        A(6, "O", "opls_154", "-0.683", "15.999", "O(H)–C(sp3)", 2, "typed"),
+        A(7, "H", "opls_155", "+0.418", "1.008", "H–O(alcohol)", 1, "typed"),
+        A(8, "C", "opls_465", "+0.510", "12.011", "C(=O)(O)–C ester", 3, "typed"),
+        A(9, "O", "opls_466", "-0.430", "15.999", "O= carbonyl", 1, "typed"),
+        A(10, "O", "opls_467", "-0.330", "15.999", "O(ester)–C(sp3)", 2, "typed"),
+        A(11, "C", "", "+0.000", "12.011", "C(sp3)(O)(H)(H)–C(=O)", 4, "untyped"),
+        A(12, "H", "opls_469", "+0.030", "1.008", "H–C(alpha ester)", 1, "low conf"),
+        A(13, "C", "opls_135", "-0.180", "12.011", "C(H)(H)(H)–C", 4, "typed"),
+        A(14, "C", "opls_157", "+0.205", "12.011", "C(sp3)(O)(H)–C", 4, "typed"),
+        A(15, "O", "", "+0.000", "15.999", "O–C(sp3), ring junction", 2, "untyped"),
+        A(16, "C", "opls_465", "+0.510", "12.011", "C(=O)(O)–C ester", 3, "typed"),
+        A(17, "O", "opls_466", "-0.430", "15.999", "O= carbonyl", 1, "typed"),
+        A(18, "H", "opls_140", "+0.060", "1.008", "H–C(sp3)", 1, "low conf")
+      ],
+      blend: [
+        { label: "PLA-50", file: "chains/PLA-50_opt.pdb", n: 24, pct: "42.0", mw: "3 604", ff: "OPLS-AA" },
+        { label: "PEG-20", file: "chains/PEG-20_opt.pdb", n: 20, pct: "31.0", mw: "0 902", ff: "OPLS-AA" },
+        { label: "PS-30", file: "chains/PS-30_opt.pdb", n: 12, pct: "19.5", mw: "3 126", ff: "GAFF" },
+        { label: "plasticizer", file: "small/DEHP.pdb", n: 8, pct: "7.5", mw: "0 390", ff: "GAFF" }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

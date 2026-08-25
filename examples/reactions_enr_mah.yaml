@@ -1,0 +1,28 @@
+# Example: learn a reaction library from multiple reactant/product pairs.
+# Any format OpenBabel can read (xyz/pdb/mol2/mol/sdf) works — the tool
+# builds molecular graphs itself, so LAMMPS-data is NOT required.
+#
+# Consumed by:  moltemplate-auto reactions-learn --folder reactions_input/ --out lib.json
+#
+# Folder layout (option 1):
+#   reactions_input/
+#     epoxide_opening/
+#       reactant.xyz
+#       product.xyz
+#     mah_addition/
+#       reactant.mol2
+#       product.mol2
+#
+# Or feed the CLI directly (option 2):
+#   moltemplate-auto reactions-learn \
+#     --reactant epoxide_opening/reactant.xyz \
+#     --product  epoxide_opening/product.xyz  --name epoxide_opening \
+#     --reactant mah_addition/reactant.mol2   \
+#     --product  mah_addition/product.mol2    --name mah_addition \
+#     --out reaction_library.json
+#
+# Then apply to a packed system:
+#   moltemplate-auto reactions-apply \
+#     --library reaction_library.json \
+#     --system  packed_blend.xyz \
+#     --out     crosslinked.xyz --max-events 50000 --cutoff 4.5

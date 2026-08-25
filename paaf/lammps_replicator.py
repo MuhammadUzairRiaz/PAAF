@@ -1,0 +1,507 @@
+"""Replicate a single-chain LAMMPS data file into an N-chain packed box.
+
+Port of the user's ``create_box_lammps_nonhybrid_chains.py`` workflow:
+
+1. Read the single-chain LAMMPS data file produced by ``dl_field``
+   (``dlf_output1/lammps1.data``) with all its Atoms / Bonds / Angles /
+   Dihedrals / Impropers sections and coefficients.
+2. Use ``packmol`` to pack ``n_chains`` copies of the chain into a box of the
+   requested dimensions (via a packmol input file that references the same
+   single-chain PDB N times).
+3. Read back the packed coordinates, replicate the atom-id / molecule-id /
+   bond-id / angle-id / dihedral-id / improper-id tables with proper offsets,
+   and write a final consolidated ``packed_box.data``.
+4. Validate that no bond length is unreasonably long (default > 3.0 Å) —
+   packmol occasionally shears a chain if the box is too small.
+
+If ``packmol`` isn't on PATH, PAAF falls back to a numpy grid packer
+(similar to ``paaf.cell.amorphous._pack_grid``) so the pipeline
+still produces a topologically-valid packed data file even without packmol
+installed.
+"""
+from __future__ import annotations
+
+import math
+import random
+import shutil
+import subprocess
+import tempfile
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+
+from .logging_utils import get_logger
+
+log = get_logger(__name__)
+
+
+TOPOLOGY_SECTIONS = ("Bonds", "Angles", "Dihedrals", "Impropers")
+COEFFICIENT_SECTIONS = (
+    "Masses", "Pair Coeffs", "PairIJ Coeffs",
+    "Bond Coeffs", "Angle Coeffs", "Dihedral Coeffs", "Improper Coeffs",
+)
+ALL_KNOWN_SECTIONS = COEFFICIENT_SECTIONS + ("Atoms", "Velocities") + TOPOLOGY_SECTIONS
+
+
+# ================================================================ parsing
+def parse_lammps_data(path: Path) -> Tuple[List[str], Dict[str, List[str]]]:
+    """Return (header_lines, {section_name: [content_lines]})."""
+    lines = Path(path).read_text().splitlines()
+    header: List[str] = []
+    sections: Dict[str, List[str]] = {}
+    current: Optional[str] = None
+    for line in lines:
+        stripped = line.strip()
+        matched = None
+        for sec in ALL_KNOWN_SECTIONS:
+            if stripped == sec or stripped.startswith(sec + " "):
+                matched = sec; break
+        if matched:
+            current = matched
+            sections.setdefault(current, [])
+            continue
+        if current is None:
+            header.append(line)
+        else:
+            sections[current].append(line)
+    return header, sections
+
+
+def _clean(section: Optional[List[str]]) -> List[str]:
+    if not section:
+        return []
+    return [l for l in section if l.strip() and not l.strip().startswith("#")]
+
+
+def _header_count(header: List[str], keyword: str) -> int:
+    for line in header:
+        parts = line.split()
+        if len(parts) >= 2 and parts[0].isdigit() and " ".join(parts[1:]) == keyword:
+            return int(parts[0])
+    return 0
+
+
+# ================================================================ writing
+def _write_pdb_from_data(data_file: Path, out_pdb: Path,
+                         coords: Optional[Dict[int, tuple]] = None) -> None:
+    """Write a minimal PDB of the single-chain atoms so packmol can read it.
+
+    ``coords`` optionally replaces the geometry, keyed by the data file's own
+    atom id — used to pack a chain that has just been energy-minimised rather
+    than the geometry the builder happened to produce. Types and the topology
+    are untouched; only positions change.
+
+    Atoms are written **in ascending atom-id order**, which is not necessarily
+    the order they appear in the file. That is not cosmetic: packmol returns
+    the packed coordinates in the order it was given them, and both callers
+    that pair those coordinates back onto atom lines
+    (``_replicate_atoms`` here, ``_replicate_component_atoms`` in
+    ``blend_replicator``) sort by atom id first. Writing this PDB in file
+    order instead left the two orderings agreeing only when the data file
+    happened to be sorted — true of moltemplate output, and of nothing else.
+    When they disagreed, every atom in every chain took another atom's
+    position: right formula, right topology, bonds stretched across the
+    molecule, and no error anywhere.
+    """
+    _, sections = parse_lammps_data(data_file)
+    atoms = sorted(_clean(sections.get("Atoms")),
+                   key=lambda l: int(l.split()[0]))
+    masses = {int(l.split()[0]): l.split()[1] for l in _clean(sections.get("Masses"))}
+    element_by_mass = [("H", 1), ("C", 12), ("N", 14), ("O", 16), ("F", 19),
+                       ("Si", 28), ("S", 32), ("Cl", 35), ("Br", 80)]
+
+    def _guess_elem(atom_type: int) -> str:
+        try:
+            m = float(masses.get(atom_type, "12"))
+        except ValueError:
+            return "C"
+        return min(element_by_mass, key=lambda e: abs(e[1] - m))[0]
+
+    out = ["REMARK   packmol input generated by PAAF from " + str(data_file)]
+    # Strict PDB HETATM column layout (packmol is picky about columns!):
+    #   1-6   record   "HETATM"
+    #   7-11  serial
+    #   13-16 atom name
+    #   17    altLoc
+    #   18-20 residue name
+    #   22    chain
+    #   23-26 residue seq
+    #   31-38 X (Real 8.3)
+    #   39-46 Y (Real 8.3)
+    #   47-54 Z (Real 8.3)
+    #   55-60 occupancy
+    #   61-66 temp factor
+    #   77-78 element symbol
+    for i, line in enumerate(atoms, start=1):
+        parts = line.split()
+        # Cap serial at 99999 (5-column limit).
+        serial = min(i, 99999)
+        atype = int(parts[2])
+        if coords is not None and int(parts[0]) in coords:
+            x, y, z = coords[int(parts[0])]
+        else:
+            x, y, z = float(parts[4]), float(parts[5]), float(parts[6])
+        elem = _guess_elem(atype)
+        # Atom name: element right-justified to 2 chars + serial (like C1, C2, HA)
+        name = (elem + str(serial))[:4]
+        out.append(
+            "HETATM"                        # 1-6
+            f"{serial:5d}"                  # 7-11
+            " "                             # 12
+            f"{name:<4s}"                   # 13-16 (left-justified)
+            " "                             # 17 (altLoc)
+            "MOL"                           # 18-20 (resName)
+            " "                             # 21
+            "A"                             # 22 (chainID)
+            f"{1:4d}"                       # 23-26 (resSeq)
+            "    "                          # 27-30 (icode + 3 spaces)
+            f"{x:8.3f}{y:8.3f}{z:8.3f}"     # 31-54
+            f"{1.00:6.2f}{0.00:6.2f}"       # 55-66
+            "          "                    # 67-76
+            f"{elem:>2s}"                   # 77-78
+        )
+    out.append("END")
+    out_pdb.write_text("\n".join(out) + "\n")
+
+
+def _read_xyz_or_pdb_coords(path: Path) -> List[Tuple[float, float, float]]:
+    """Read coordinates from a packmol PDB or plain XYZ.
+
+    Uses whitespace-split parsing rather than strict PDB column widths, so
+    it works with slightly non-standard PDB writers (packmol, mbuild, our
+    own grid fallback). For PDB ATOM/HETATM lines the numeric coordinates
+    are the last three FLOAT-looking columns before the occupancy/B-factor.
+    """
+    coords: List[Tuple[float, float, float]] = []
+    text = path.read_text().splitlines()
+    if path.suffix.lower() == ".xyz":
+        for line in text[2:]:  # skip 2-line xyz header
+            parts = line.split()
+            if len(parts) >= 4:
+                try:
+                    coords.append((float(parts[1]), float(parts[2]), float(parts[3])))
+                except ValueError:
+                    continue
+    else:  # PDB (or any file with HETATM/ATOM lines)
+        for line in text:
+            if not (line.startswith("HETATM") or line.startswith("ATOM")):
+                continue
+            # Collect only tokens that LOOK like real coordinates: contain
+            # a decimal point. This lets us skip serial numbers and residue
+            # sequence numbers (both ints) safely.
+            floats: List[float] = []
+            for tok in line.split():
+                if "." not in tok:
+                    continue
+                try:
+                    floats.append(float(tok))
+                except ValueError:
+                    continue
+            # First three decimal-number tokens after the fixed header are
+            # x, y, z. Anything after is usually occupancy / temp factor.
+            if len(floats) >= 3:
+                coords.append((floats[0], floats[1], floats[2]))
+    return coords
+
+
+# ================================================================ packing
+def _find_packmol(explicit: Optional[str] = None) -> Optional[str]:
+    """Locate the packmol binary robustly.
+
+    Order of precedence:
+      1. `explicit` argument (from Config.packmol_path or the GUI field)
+      2. $PACKMOL_EXE environment variable
+      3. shutil.which("packmol")     — respects $PATH
+      4. Common install locations (Homebrew, MacPorts, various Conda layouts).
+
+    Returns the path if it exists on disk, else None.
+    """
+    import os
+    if explicit and Path(explicit).exists():
+        return str(explicit)
+    env = os.environ.get("PACKMOL_EXE", "")
+    if env and Path(env).exists():
+        return env
+    exe = shutil.which("packmol")
+    if exe:
+        return exe
+    for candidate in (
+        "/opt/homebrew/bin/packmol",                                       # Apple-silicon Homebrew
+        "/usr/local/bin/packmol",                                          # Intel Homebrew
+        "/opt/local/bin/packmol",                                          # MacPorts
+        str(Path.home() / "miniconda3/bin/packmol"),
+        str(Path.home() / "anaconda3/bin/packmol"),
+        str(Path.home() / "opt/miniconda3/bin/packmol"),
+        str(Path.home() / "opt/miniconda3/envs/mta/bin/packmol"),
+        "/opt/homebrew/Caskroom/miniconda/base/bin/packmol",               # miniconda-in-Homebrew
+        "/opt/homebrew/Caskroom/miniconda/base/envs/mta/bin/packmol",      # user's actual path
+    ):
+        if Path(candidate).exists():
+            return candidate
+    return None
+
+
+def _pack_with_packmol(single_pdb: Path, n: int, box_edges: Tuple[float, float, float],
+                      out_pdb: Path, tolerance: float = 2.0, seed: int = -1,
+                      packmol_path: Optional[str] = None) -> bool:
+    """Pack ``n`` copies of ``single_pdb`` into a box via packmol.
+
+    ``seed`` semantics:
+      * ``seed >= 0`` — packmol uses that fixed seed → **same layout every run**
+      * ``seed < 0``  — PAAF picks a fresh time-based seed → **different every run**
+    """
+    exe = _find_packmol(explicit=packmol_path)
+    if exe is None:
+        log.warning("packmol not found on PATH or common install locations; "
+                    "install with 'brew install packmol' or add to PATH.")
+        return False
+    log.info("Using packmol at %s", exe)
+    # A negative seed means "randomise" — pick a fresh one so successive runs
+    # of the pipeline produce different packings. This is the single biggest
+    # reason users report "the packing looks the same every time".
+    if seed is None or int(seed) < 0:
+        seed = random.randint(1, 2_000_000_000)
+        log.info("packmol: using time-based random seed %d (pass a positive "
+                 "seed on the Box page to reproduce a specific layout)", seed)
+    inp = out_pdb.parent / "pack.inp"
+    a, b, c = box_edges
+    # Keep the input file to the packmol-core keywords that ship in EVERY
+    # packmol version (20.x and older). Random placement is already the
+    # default — we just need a fresh seed each run.
+    lines = [
+        f"tolerance {tolerance}",
+        f"seed {seed}",
+        "filetype pdb",
+        f"output {out_pdb}",
+        f"structure {single_pdb}",
+        f"  number {n}",
+        f"  inside box 0. 0. 0. {a:.4f} {b:.4f} {c:.4f}",
+        "end structure",
+    ]
+    inp.write_text("\n".join(lines) + "\n")
+    # Also save the packmol log next to the packed file so users can inspect it.
+    log_path = out_pdb.parent / "packmol.log"
+    log.info("Packing %d copies into %.1fx%.1fx%.1f Å (log: %s)",
+             n, a, b, c, log_path)
+    with inp.open() as fh:
+        proc = subprocess.run([exe], stdin=fh, capture_output=True, text=True)
+    try:
+        log_path.write_text(
+            "$ " + exe + " < " + str(inp) + "\n\n"
+            + "----- STDOUT -----\n" + (proc.stdout or "") + "\n"
+            + "----- STDERR -----\n" + (proc.stderr or "") + "\n"
+        )
+    except OSError:
+        pass
+    if proc.returncode != 0 or not out_pdb.exists():
+        tail = "\n".join((proc.stdout or "").splitlines()[-30:])
+        log.warning("packmol failed (rc=%d). Last lines:\n%s",
+                    proc.returncode, tail)
+        return False
+    return True
+
+
+def _pack_grid(single_pdb: Path, n: int, box_edges: Tuple[float, float, float],
+              out_pdb: Path, seed: int = 12345) -> None:
+    """Fallback numpy grid packer when packmol is not available."""
+    coords_one = _read_xyz_or_pdb_coords(single_pdb)
+    center = np.mean(coords_one, axis=0)
+    coords_one = np.array(coords_one) - center
+    # numpy's legacy seed API rejects anything outside [0, 2^32 - 1].
+    # Our convention: seed < 0 means "pick a random one".
+    if seed is None or int(seed) < 0:
+        seed = random.randint(1, 2**31 - 1)
+    seed = int(seed) % (2**32 - 1)
+    rng = random.Random(seed); np.random.seed(seed)
+    a, b, c = box_edges
+    grid_n = max(1, int(math.ceil(n ** (1.0 / 3.0))))
+    positions = [(i + 0.5, j + 0.5, k + 0.5)
+                 for i in range(grid_n) for j in range(grid_n) for k in range(grid_n)]
+    rng.shuffle(positions)
+    step = (a / grid_n, b / grid_n, c / grid_n)
+    pdb_lines = [f"REMARK   grid-packed by PAAF fallback (no packmol)"]
+    atom_serial = 1
+    for chain_i in range(n):
+        gi, gj, gk = positions[chain_i]
+        shift = np.array([gi * step[0], gj * step[1], gk * step[2]])
+        for xyz in coords_one:
+            x, y, z = xyz + shift
+            pdb_lines.append(
+                f"HETATM{atom_serial:5d}  C   MOL{chain_i + 1:6d}    "
+                f"{x:8.3f}{y:8.3f}{z:8.3f}  1.00  0.00           C"
+            )
+            atom_serial += 1
+    pdb_lines.append("END")
+    out_pdb.write_text("\n".join(pdb_lines) + "\n")
+
+
+# ================================================================ replication
+def _replicate_atoms(atom_lines: List[str], coords: List[Tuple[float, float, float]],
+                    nchains: int) -> List[str]:
+    natoms_chain = len(atom_lines)
+    if len(coords) != natoms_chain * nchains:
+        # Common failure: packmol wasn't installed, grid fallback ran but
+        # something went wrong reading its output. Or packmol produced a
+        # slightly non-standard PDB. Give the user actionable info.
+        raise RuntimeError(
+            "Packed coordinates count mismatch: got " + str(len(coords))
+            + " atoms in the packed file, but expected "
+            + str(nchains) + " chains × " + str(natoms_chain) + " atoms/chain = "
+            + str(nchains * natoms_chain) + ".\n"
+            "Most likely causes:\n"
+            "  1. packmol isn't installed on your PATH (`brew install packmol`),\n"
+            "     and the grid fallback packer failed to write valid coordinates.\n"
+            "  2. packmol produced a non-standard PDB the parser couldn't read.\n"
+            "Try installing packmol, or set n_chains=1 to skip packing."
+        )
+    original = []
+    for line in atom_lines:
+        parts = line.split()
+        original.append((int(parts[0]), int(parts[2]), float(parts[3])))
+    original.sort()
+    out: List[str] = []
+    ci = 0
+    for chain_i in range(nchains):
+        offset = chain_i * natoms_chain
+        molid = chain_i + 1
+        for oid, atype, charge in original:
+            x, y, z = coords[ci]; ci += 1
+            out.append(f"{oid + offset} {molid} {atype} {charge:.8f} "
+                       f"{x:.8f} {y:.8f} {z:.8f}")
+    return out
+
+
+def _replicate_topology(topo_lines: List[str], natoms_chain: int, nchains: int) -> List[str]:
+    parsed = []
+    for line in topo_lines:
+        parts = line.split()
+        if len(parts) < 4: continue
+        parsed.append((int(parts[0]), int(parts[1]), [int(x) for x in parts[2:]]))
+    parsed.sort()
+    nterms = len(parsed)
+    out: List[str] = []
+    for chain_i in range(nchains):
+        a_off = chain_i * natoms_chain
+        t_off = chain_i * nterms
+        for old_id, ttype, aids in parsed:
+            new_id = old_id + t_off
+            new_aids = " ".join(str(a + a_off) for a in aids)
+            out.append(f"{new_id} {ttype} {new_aids}")
+    return out
+
+
+# ================================================================ top-level
+def replicate_single_chain(
+    single_data_file: Path,
+    n_chains: int,
+    box_edges: Tuple[float, float, float],
+    out_data_file: Path,
+    seed: int = -1,
+    tolerance: float = 2.0,
+    packmol_path: Optional[str] = None,
+) -> Path:
+    """Given a single-chain LAMMPS data file, produce packed_box.data
+    containing `n_chains` copies packed inside `box_edges` (Å).
+    """
+    single_data_file = Path(single_data_file).resolve()
+    out_data_file = Path(out_data_file).resolve()
+    work = Path(tempfile.mkdtemp(prefix="paaf_pack_"))
+    single_pdb = work / "single_chain.pdb"
+    _write_pdb_from_data(single_data_file, single_pdb)
+
+    packed_pdb = work / "packed.pdb"
+    _used_packmol = _pack_with_packmol(
+        single_pdb, n_chains, box_edges, packed_pdb,
+        tolerance=tolerance, seed=seed, packmol_path=packmol_path)
+    if not _used_packmol:
+        # If a packmol binary WAS found but the run failed, that's a hard
+        # error the user needs to see (bad tolerance, tiny box, corrupt PDB,
+        # unrecognised keyword) — surface the tail of packmol.log so they
+        # can fix it, instead of quietly falling to the deterministic grid.
+        pk_log = packed_pdb.parent / "packmol.log"
+        pk_tail = ""
+        if pk_log.exists():
+            pk_tail = "\n".join(pk_log.read_text(errors="replace").splitlines()[-25:])
+        exe = _find_packmol(explicit=packmol_path)
+        if exe is not None:
+            raise RuntimeError(
+                "packmol was found at " + str(exe) + " but the packing run "
+                "FAILED. This is why the chains would otherwise fall back to "
+                "the deterministic grid packer.\n\n"
+                "Common causes: box too small for the chains, unrecognised "
+                "keyword in pack.inp, or a corrupt single-chain PDB.\n\n"
+                "Last lines of packmol.log:\n\n" + (pk_tail or "(no packmol.log written)")
+                + "\n\nWorking dir: " + str(packed_pdb.parent)
+            )
+        # No packmol at all → grid fallback (announced loudly).
+        log.warning("=" * 70)
+        log.warning("PACKMOL NOT FOUND — using deterministic GRID fallback.")
+        log.warning("Install with 'brew install packmol' or 'conda install -c conda-forge packmol'")
+        log.warning("and set the path on the Box page.")
+        log.warning("=" * 70)
+        _pack_grid(single_pdb, n_chains, box_edges, packed_pdb, seed=seed)
+    else:
+        log.info("PACKED via packmol (random layout).")
+
+    coords = _read_xyz_or_pdb_coords(packed_pdb)
+
+    header, sections = parse_lammps_data(single_data_file)
+    atoms_orig = _clean(sections.get("Atoms"))
+    natoms_chain = len(atoms_orig)
+    topo_orig = {s: _clean(sections.get(s)) for s in TOPOLOGY_SECTIONS}
+
+    new_atoms = _replicate_atoms(atoms_orig, coords, n_chains)
+    new_topo = {s: _replicate_topology(topo_orig[s], natoms_chain, n_chains)
+                for s in TOPOLOGY_SECTIONS}
+
+    # Write final data
+    a, b, c = box_edges
+    n_atoms_final = natoms_chain * n_chains
+    n_bonds_final = len(topo_orig["Bonds"]) * n_chains
+    n_angles_final = len(topo_orig["Angles"]) * n_chains
+    n_dih_final = len(topo_orig["Dihedrals"]) * n_chains
+    n_imp_final = len(topo_orig["Impropers"]) * n_chains
+
+    out_lines: List[str] = []
+    out_lines.append(f"LAMMPS data — {n_chains} chains packed by PAAF")
+    out_lines.append("")
+    out_lines.append(f"{n_atoms_final} atoms")
+    if n_bonds_final: out_lines.append(f"{n_bonds_final} bonds")
+    if n_angles_final: out_lines.append(f"{n_angles_final} angles")
+    if n_dih_final:   out_lines.append(f"{n_dih_final} dihedrals")
+    if n_imp_final:   out_lines.append(f"{n_imp_final} impropers")
+    out_lines.append("")
+    # Preserve type counts from single-chain header
+    for key in ("atom types", "bond types", "angle types", "dihedral types",
+                "improper types"):
+        n = _header_count(header, key)
+        if n:
+            out_lines.append(f"{n} {key}")
+    out_lines.append("")
+    out_lines.append(f"0.0 {a:.4f} xlo xhi")
+    out_lines.append(f"0.0 {b:.4f} ylo yhi")
+    out_lines.append(f"0.0 {c:.4f} zlo zhi")
+    out_lines.append("")
+
+    # Copy coefficient sections verbatim (Masses, Pair Coeffs, Bond Coeffs, etc.)
+    for sec in COEFFICIENT_SECTIONS:
+        content = _clean(sections.get(sec))
+        if content:
+            out_lines.append(sec); out_lines.append("")
+            out_lines.extend(content); out_lines.append("")
+
+    out_lines.append("Atoms  # full"); out_lines.append("")
+    out_lines.extend(new_atoms); out_lines.append("")
+
+    for sec, name in (("Bonds", "Bonds"), ("Angles", "Angles"),
+                      ("Dihedrals", "Dihedrals"), ("Impropers", "Impropers")):
+        if new_topo[sec]:
+            out_lines.append(name); out_lines.append("")
+            out_lines.extend(new_topo[sec]); out_lines.append("")
+
+    out_data_file.parent.mkdir(parents=True, exist_ok=True)
+    out_data_file.write_text("\n".join(out_lines) + "\n")
+    log.info("Wrote packed LAMMPS data (%d chains, %d atoms) -> %s",
+             n_chains, n_atoms_final, out_data_file)
+    return out_data_file

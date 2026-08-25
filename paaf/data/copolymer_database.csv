@@ -1,0 +1,3 @@
+PID,smiles_polymer,smiles_polymer_b,fraction_b,sequence_mode,random_seed
+W01_P0ENR,[*]C/C=C(C)\C[*],[*]CC1(C)OC1C[*],0.5,random,12345
+

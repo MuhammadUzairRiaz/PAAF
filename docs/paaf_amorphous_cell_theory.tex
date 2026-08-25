@@ -1,0 +1,1058 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{tcolorbox}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=black,urlcolor=blue]{hyperref}
+\usepackage{fancyhdr}
+\usepackage{caption}
+\usepackage{enumitem}
+
+\definecolor{paafblue}{HTML}{2563EB}
+\definecolor{paafslate}{HTML}{0F1B2D}
+\definecolor{paafgrey}{HTML}{64748B}
+\definecolor{warnbg}{HTML}{FEF3C7}
+\definecolor{warnbd}{HTML}{D97706}
+
+\newtcolorbox{caveat}[1][]{colback=warnbg!40,colframe=warnbd,
+  boxrule=0.6pt,arc=2pt,left=6pt,right=6pt,top=5pt,bottom=5pt,#1}
+
+\newtcolorbox{algobox}[1][]{colback=white,colframe=paafslate,
+  boxrule=0.6pt,arc=2pt,left=8pt,right=8pt,top=6pt,bottom=6pt,#1}
+
+% Pseudocode without algorithm.sty: a stepped list with its own counter.
+\newcounter{algoline}
+\newcommand{\algoreset}{\setcounter{algoline}{0}}
+\newcommand{\alg}[2][0]{%
+  \refstepcounter{algoline}%
+  \noindent\makebox[2.2em][r]{\scriptsize\color{paafgrey}\thealgoline:}%
+  \hspace{4pt}\hspace{#1\parindent}\parbox[t]{\dimexpr\linewidth-2.2em-4pt-#1\parindent}{\raggedright #2}\par\vspace{1.2pt}}
+\newcommand{\kw}[1]{\textbf{\color{paafblue}#1}}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small\color{paafgrey}PAAF --- Amorphous Cell Construction}
+\rhead{\small\color{paafgrey}\thepage}
+\renewcommand{\headrulewidth}{0.3pt}
+
+\captionsetup{font=small,labelfont=bf}
+\setlist{itemsep=2pt,parsep=0pt,topsep=3pt}
+
+\title{\vspace{-1.2cm}\textbf{Amorphous Cell Construction in PAAF}\\[4pt]
+\large Theory, Algorithm, Implementation and Validation}
+\author{Polymer Auto-Assembly Framework (PAAF)}
+\date{\today}
+
+\begin{document}
+\maketitle
+\thispagestyle{fancy}
+
+\begin{abstract}
+\noindent
+PAAF builds periodic amorphous polymer cells by \emph{chain growth}: each
+chain is constructed one skeletal bond at a time, with the torsion about that
+bond drawn from a rotational isomeric state (RIS) distribution reweighted by
+the non-bonded environment already present in the box. This is the method of
+Theodorou and Suter~\cite{ts1985}, optionally combined with the scanning
+method of Meirovitch~\cite{meirovitch1983}, on the statistical foundation laid
+by Flory~\cite{flory1969}. It is the same published pair of algorithms that
+underlies the BIOVIA Materials Studio \emph{Amorphous Cell} module, which
+BIOVIA documents as ``the combined use of the arc algorithm developed by
+Theodorou and Suter and the scanning method of Meirovitch''~\cite{biovia}.
+
+This report states the theory with its equations, specifies exactly what PAAF
+implements, reports the measured validation of every physical claim, and sets
+out --- without softening --- what the implementation does \emph{not} do. The
+characteristic ratio $C_\infty$ is reproduced within $12\%$ of tabulated
+values for all four parameterised polymers; bond lengths and angles are exact
+to floating-point precision; melt densities are reached, unbiased at
+$0.85$ and $1.04$~g/cm$^3$. The principal limitations are that PAAF performs \emph{construction
+only} with no subsequent energy minimisation, that growth is at
+united-skeletal-atom resolution followed by back-mapping rather than direct
+full-atomistic construction, and that polymer-specific RIS parameters exist
+for four polymers only. Section~\ref{sec:novelty} assesses novelty honestly:
+the method is a faithful reimplementation, not a new algorithm.
+\end{abstract}
+
+\tableofcontents
+\vspace{6pt}
+\hrule
+
+%======================================================================
+\section{Why growth rather than insertion}
+\label{sec:why}
+
+The natural first approach to filling a periodic box with polymer is to build
+whole chains and insert them at random positions and orientations, rejecting
+overlaps. This works for solvents and short oligomers and fails for polymers,
+for a reason that is geometric rather than a matter of tuning.
+
+A random coil pervades a volume set by its radius of gyration,
+$R_g \propto N^{1/2}$, so the pervaded volume scales as $N^{3/2}$ while the
+mass inside it scales only as $N$. At melt density that pervaded volume is
+mostly \emph{other chains}: a polymer coil is roughly $99\%$ not-itself.
+Inserting a chain whole therefore requires locating a cavity shaped like an
+entire coil, and the probability of that decreases roughly exponentially in
+$N$. Acceptance collapses somewhere between $20$ and $50$ repeat units.
+
+Growing the chain bond by bond replaces one impossible question --- ``is there
+a coil-shaped hole?'' --- with many easy ones --- ``is there room for one more
+skeletal atom?''. Each step requires only local free volume, and the chain
+finds its own way through the material already placed. This is the central
+insight of Theodorou and Suter~\cite{ts1985}, and it is why every serious
+amorphous cell builder grows rather than inserts.
+
+%======================================================================
+\section{Rotational isomeric state theory}
+\label{sec:ris}
+
+\subsection{The three-state model}
+
+A backbone torsion is not free. Rotation about a C--C bond has three minima
+--- \emph{trans} ($\phi \approx 180^\circ$) and \emph{gauche}$^{\pm}$
+($\phi \approx \pm 60^\circ$) --- separated by barriers of a few kcal/mol. The
+RIS approximation of Flory and Volkenstein replaces the continuous torsional
+potential by these discrete states~\cite{flory1969,mattice1994}. Two facts
+follow, and both control chain dimensions.
+
+First, the minima are not equally weighted. A gauche state costs an extra
+energy $E_\sigma$ relative to trans, giving the first-order statistical weight
+\begin{equation}
+  \sigma = \exp\!\left(-\frac{E_\sigma}{RT}\right) < 1 .
+  \label{eq:sigma}
+\end{equation}
+
+Second, neighbouring torsions are \emph{correlated}. A $g^{+}g^{-}$ pair
+drives the two chain segments on either side into one another --- the
+\emph{pentane effect} --- and carries a large additional penalty $E_\omega$,
+\begin{equation}
+  \omega = \exp\!\left(-\frac{E_\omega}{RT}\right) \ll 1 .
+  \label{eq:omega}
+\end{equation}
+
+Both are encoded in the $3\times3$ statistical weight matrix, indexed
+$U[\,\text{previous state},\ \text{current state}\,]$ in the order
+$(t,\, g^{+},\, g^{-})$:
+\begin{equation}
+  \mathbf{U}(T) =
+  \begin{pmatrix}
+    1 & \sigma & \sigma \\
+    1 & \sigma & \sigma\omega \\
+    1 & \sigma\omega & \sigma
+  \end{pmatrix}.
+  \label{eq:umatrix}
+\end{equation}
+Every row begins with $1$ because trans is the reference state. The factor
+$\omega$ appears only on the $g^{+}g^{-}$ and $g^{-}g^{+}$ entries --- exactly
+the pairs whose substituents collide. In PAAF at $T = 413$~K for
+polyethylene this gives $U[g^{+},g^{+}] = 0.5438$ against
+$U[g^{+},g^{-}] = 0.0421$, a suppression of $12.9\times$, which is the pentane
+effect made numerical.
+
+\subsection{Exact finite-chain sampling}
+
+A naive sampler would draw the next state from $P(k) \propto U[j,k]$. That is
+wrong for a chain of finite length, because it ignores how many conformations
+each choice leaves available downstream, and it biases the chain ends.
+
+PAAF instead uses Flory's matrix method as a \emph{sampler}. The partition
+function is accumulated backwards from the far end of the chain,
+\begin{equation}
+  \mathbf{Z}^{(i)} = \mathbf{U}\,\mathbf{Z}^{(i+1)},
+  \qquad \mathbf{Z}^{(n)} = \mathbf{1},
+  \label{eq:backward}
+\end{equation}
+after which the forward conditional probability is exact:
+\begin{equation}
+  P(k \mid j) =
+  \frac{U[j,k]\, Z^{(i+1)}_{k}}
+       {\sum_{k'} U[j,k']\, Z^{(i+1)}_{k'}} .
+  \label{eq:conditional}
+\end{equation}
+The recursion in Eq.~\eqref{eq:backward} is renormalised at each step, since
+the product underflows for long chains and only ratios are ever used.
+
+Table~\ref{tab:pops} shows that the realised state populations from
+Eq.~\eqref{eq:conditional} reproduce the transfer-matrix prediction --- the
+exact long-chain limit obtained from the principal eigenvector of
+$\mathbf{U}$ --- to better than $0.006$ in every state.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{llrrr}
+\toprule
+Polymer & State & Realised & Predicted & $\Delta$ \\
+\midrule
+PE & $t$      & 0.6011 & 0.5974 & $+0.0037$ \\
+   & $g^{+}$  & 0.2036 & 0.2013 & $+0.0023$ \\
+   & $g^{-}$  & 0.1953 & 0.2013 & $-0.0060$ \\
+\midrule
+PS & $t$      & 0.6786 & 0.6741 & $+0.0045$ \\
+   & $g^{+}$  & 0.1629 & 0.1630 & $-0.0001$ \\
+   & $g^{-}$  & 0.1585 & 0.1630 & $-0.0044$ \\
+\bottomrule
+\end{tabular}
+\caption{Sampled torsion-state populations against the transfer-matrix
+prediction, $T = 413$~K, 80 chains of 500 torsions. Measured by
+\texttt{tests/test\_ris.py}.}
+\label{tab:pops}
+\end{table}
+
+\subsection{Chain geometry}
+
+Bond lengths $l$ and bond angles $\theta$ are held \emph{fixed}; only the
+torsion varies. Each successive skeletal atom is placed by exact internal
+coordinates using the Natural Extension Reference Frame construction: given
+three consecutive placed atoms $\mathbf{a}, \mathbf{b}, \mathbf{c}$, the next
+atom is
+\begin{equation}
+  \mathbf{d} = \mathbf{c} + l\,\mathbf{R}(\mathbf{a},\mathbf{b},\mathbf{c})
+  \begin{pmatrix}
+    -\cos\theta \\ \sin\theta\cos\phi \\ \sin\theta\sin\phi
+  \end{pmatrix},
+  \label{eq:nerf}
+\end{equation}
+where $\mathbf{R}$ is the orthonormal frame built from the preceding three
+atoms. Because Eq.~\eqref{eq:nerf} is an exact construction rather than a
+minimisation, the geometry cannot drift: PAAF measures bond lengths of
+$1.530000 \pm 1.5\times10^{-15}$~\AA{} and bond angles of
+$112.0000 \pm 5.7\times10^{-14}\,^\circ$ over chains of 300 torsions, which
+is floating-point noise.
+
+\subsection{The characteristic ratio, and why it is the test}
+
+The observable that reveals whether an RIS implementation is real is the
+characteristic ratio
+\begin{equation}
+  C_n = \frac{\langle R^2 \rangle}{n\,l^2},
+  \label{eq:cn}
+\end{equation}
+the mean-square end-to-end distance relative to a freely jointed walk of the
+same bond count. Its limiting value $C_\infty$ is tabulated experimentally for
+real polymers. Three regimes must be distinguishable:
+
+\begin{center}
+\small
+\begin{tabular}{lcl}
+\toprule
+Model & $C$ for PE & What it captures \\
+\midrule
+Freely jointed & $1.0$ & nothing \\
+Freely rotating ($\theta$ fixed) & $\approx 2.2$ & bond angle only \\
+RIS ($\theta$ fixed, $\phi$ weighted) & $\approx 6.7$ & + torsional statistics \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The freely rotating limit has a closed form that serves as an independent
+check on the geometry code alone:
+\begin{equation}
+  C_\infty^{\text{fr}} = \frac{1 + \cos\alpha}{1 - \cos\alpha},
+  \qquad \alpha = 180^\circ - \theta .
+  \label{eq:freelyrotating}
+\end{equation}
+For $\theta = 112^\circ$ this gives $2.198$; PAAF measures $2.445 \pm 0.098$
+with torsions sampled uniformly, confirming that the chain builder is correct
+before any statistics are applied. With RIS weights switched on, the same code
+gives $6.82$ against $2.22$ for random torsions --- a factor of $3.07$. An
+implementation in which RIS were decorative would sit at the freely rotating
+baseline.
+
+%======================================================================
+\section{Growth into the periodic cell}
+\label{sec:growth}
+
+\subsection{The growth probability}
+
+The Theodorou--Suter construction adds one skeletal bond at a time. For each
+candidate rotational isomeric state $s$ the trial atom position is computed
+from Eq.~\eqref{eq:nerf}, and the state is chosen with probability
+\begin{equation}
+  P(\phi_s) \;\propto\; U[\,j, s\,]\;
+  \exp\!\left(-\frac{E^{\text{nb}}_{s}}{k_B T}\right),
+  \label{eq:growth}
+\end{equation}
+where $j$ is the state of the previous torsion and $E^{\text{nb}}_{s}$ is the
+non-bonded energy of the trial atom against the atoms of \emph{previously
+completed chains}, evaluated under the minimum-image convention within the
+neighbour-list cutoff. Equation~\eqref{eq:growth} is the heart of the method:
+the first factor makes the coil the right \emph{size}, the second makes it
+avoid \emph{other chains}. Note that the growing chain's own beads do not
+enter $E^{\text{nb}}$ --- a chain is inserted into the neighbour grid only
+once complete --- so intra-chain crowding is handled entirely by the hard
+self-avoidance test described below.
+
+\subsection{The non-bonded term}
+
+A full Lennard-Jones sum would be the faithful choice, but it requires
+per-atom LJ parameters that are not available until the force field is
+assigned --- which in PAAF happens \emph{after} the cell is built. PAAF
+therefore uses a purely repulsive soft-core term keyed on van der Waals
+contact distance,
+\begin{equation}
+  E^{\text{nb}} = \epsilon \sum_{j}
+  \left(\frac{\sigma_{ij}}{r_{ij}}\right)^{12},
+  \qquad r_{ij} < \sigma_{ij},
+  \label{eq:softcore}
+\end{equation}
+with $\epsilon = 0.2$~kcal/mol.
+
+\begin{caveat}
+\textbf{Deviation from the paper, stated plainly.}
+Equation~\eqref{eq:softcore} reproduces the qualitative effect that matters
+for construction --- candidates that bury the new atom in existing material
+are strongly disfavoured --- without claiming a quantitative energy. Absolute
+values of $E^{\text{nb}}$ are not physical energies and are not reported as
+such anywhere in PAAF.
+\end{caveat}
+
+\subsection{Hard rejection: overlap and spearing}
+
+Two hard tests are applied before Eq.~\eqref{eq:growth} is evaluated, because
+no statistical weight however favourable should be able to produce them.
+
+\paragraph{Overlap.} A candidate is rejected if it comes closer to any
+non-bonded atom than
+\begin{equation}
+  r_{\min} = \max\!\left(\,d_{\text{tol}},\;
+  \tfrac{1}{2}\,(R_i + R_j)\,s\,\right),
+  \label{eq:overlap}
+\end{equation}
+with interpenetration factor $s = 0.55$ and hard tolerance
+$d_{\text{tol}} = 1.7$~\AA{} by default. Neighbour searching against other
+chains uses a cell list, so that part of the cost is $O(N)$ rather than
+$O(N^2)$; the self-avoidance scan along the growing chain is not, and is
+$O(n)$ per candidate. The 1--2, 1--3 \emph{and} 1--4 partners along the chain
+are excluded --- the first two are at bonded distance by construction, and the
+1--4 separation is set by the very torsion being chosen, so a gauche state
+legitimately brings it inside the tolerance. Against its own chain the test
+uses $d_{\text{tol}}$ alone; the radius term in Eq.~\eqref{eq:overlap} applies
+to inter-chain contacts, and only exceeds $1.7$~\AA{} above roughly
+$226$~amu per bead, which none of the polymers in Table~\ref{tab:gran} reach.
+
+\paragraph{Ring spearing.} A threaded ring is a topological defect: the bond
+cannot be pulled back out, so energy minimisation relaxes the strain and
+leaves the two permanently interlocked. It is a classic silent failure of
+constructed cells. Each ring is approximated by the disc spanned by its atoms
+and the segment--disc intersection solved directly,
+\begin{equation}
+  t = \frac{\mathbf{n}\cdot(\mathbf{c}_0 - \mathbf{p}_0)}
+           {\mathbf{n}\cdot(\mathbf{p}_1 - \mathbf{p}_0)},
+  \qquad
+  \text{speared} \iff
+  0 \le t \le 1 \ \wedge\
+  \lVert \mathbf{h} - \mathbf{c}_0 \rVert \le R_{\text{ring}},
+  \label{eq:spear}
+\end{equation}
+where $\mathbf{h}$ is the crossing point.
+
+\begin{caveat}
+\textbf{Where this test can and cannot run.} At skeletal-bead resolution a
+pendant ring is not represented at all --- polystyrene's phenyl group does not
+exist until back-mapping places it --- so during growth there is literally
+nothing to spear and the predicate, though implemented and unit-tested against
+four geometric cases, never fires. PAAF therefore performs the check on the
+finished \emph{all-atom} cell instead (Section~\ref{sec:backmap}), where it is
+a diagnostic rather than a rejection criterion. This is worth doing: applying
+it to a polystyrene cell at $1.04$~g/cm$^3$ immediately found \textbf{3
+speared bonds} among 20 phenyl rings --- a defect the construction was
+previously blind to. A full-atomistic grower could reject these during growth;
+PAAF can only report them.
+\end{caveat}
+
+\begin{caveat}
+\textbf{On the overlap tolerance.} $d_{\text{tol}}$ is \emph{not} the physical
+contact distance and must not be set to one. Equation~\eqref{eq:softcore}
+already discourages close approach; $d_{\text{tol}}$ is only a guard against
+an overlap so severe that no subsequent minimisation could repair it. Setting
+it to the true united-atom contact distance double-counts the repulsion and
+prevents the cell being built at all. The default was measured, not chosen:
+see Table~\ref{tab:tol}.
+\end{caveat}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{ccc}
+\toprule
+$d_{\text{tol}}$ (\AA) & Cells built & Mean $C_n$ \\
+\midrule
+2.0 & 1 / 3 & 5.68 \\
+1.9 & 2 / 3 & 6.69 \\
+1.8 & 2 / 3 & 7.60 \\
+\textbf{1.7} & \textbf{3 / 3} & \textbf{5.74} \\
+1.5 & 3 / 3 & 5.27 \\
+\bottomrule
+\end{tabular}
+\caption{Effect of the hard overlap tolerance. Eight polyethylene chains of
+$\mathrm{DP}=60$ grown into a $29.7$~\AA{} box at $0.85$~g/cm$^3$ (the melt
+density at 413~K), unbiased sampling, three random seeds each. Increasing
+\texttt{max\_restarts} instead is a worse remedy: at $2.0$~\AA{}, raising
+restarts from 30 to 150 still reached only 2/3 and pulled $C_n$ down to
+$4.97$, because surviving a restart selects for compact chains.}
+\label{tab:tol}
+\end{table}
+
+\subsection{Meirovitch scanning and the Rosenbluth bias}
+
+Growth can walk into a dead end from which no continuation is acceptable, and
+the whole chain is then lost --- \emph{attrition}. The scanning method of
+Meirovitch~\cite{meirovitch1983} looks $k$ steps ahead and weights each
+candidate by the total surviving weight of its continuations,
+\begin{equation}
+  W_s^{(k)} = \sum_{\text{continuations } c}
+  \prod_{m=1}^{k} U[\,s_{m-1}, s_m\,]\,
+  \exp\!\left(-\frac{E^{\text{nb}}_{m}}{k_B T}\right),
+  \label{eq:scan}
+\end{equation}
+so that Eq.~\eqref{eq:growth} is replaced by
+$P(\phi_s) \propto U[j,s]\,\exp(-E^{\text{nb}}_s/k_BT)\,W_s^{(k)}$. The cost
+is $3^{k}$ per step, so $k \in \{1,2,3\}$ is the practical range.
+
+Scanning demonstrably works against attrition. Four polyethylene chains of
+$\mathrm{DP}=40$ at $1.10$~g/cm$^3$ over three seeds: $k=0$ built 2 of 3 cells
+with 23 restarts; $k=2$ built 3 of 3 with 3 restarts.
+
+\begin{caveat}
+\textbf{Scanning is off by default, and the reason is measured.}
+Selecting a state in proportion to its look-ahead weight is a \emph{biased}
+estimator --- the Rosenbluth bias --- because states that leave more room are
+over-chosen, and those are the extended ones. Measured on dilute polyethylene
+(2 chains of $\mathrm{DP}=40$ at $0.10$~g/cm$^3$, 12 seeds), against
+$C_n = 6.78 \pm 0.24$ for the same chain grown unperturbed:
+$5.66 \pm 0.74$ at $k=0$, $7.40 \pm 1.07$ at $k=1$, $7.52 \pm 1.35$ at $k=2$.
+Scanning overshoots the unperturbed dimensions; $k=0$ undershoots them.
+Removing the bias requires carrying the Rosenbluth weight
+\begin{equation*}
+  W = \prod_{i} \sum_{s} U[j_i,s]\,\exp(-E^{\text{nb}}_{i,s}/k_BT)
+\end{equation*}
+through the construction and using it in every subsequent average, which is
+\emph{not} implemented in PAAF. Therefore: use $k=0$ when chain dimensions
+matter; use $k>0$ only when attrition would otherwise prevent the cell being
+built at all, and do not quote $C_n$ from such a cell. PAAF attaches this
+warning to any result produced with $k>0$.
+\end{caveat}
+
+\subsection{Growth granularity: one bead per skeletal atom}
+
+The RIS model parameterises a \emph{skeletal bond}. A growth step must
+therefore be a skeletal bond, not a repeat unit. PAAF determines the number of
+skeletal atoms a repeat unit contributes by finding the shortest path between
+the two polymerisation attachment points in the SMILES graph:
+\begin{equation}
+  n_{\text{skel}} = \bigl|\,\mathrm{path}(a_1 \to a_2)\,\bigr| ,
+  \qquad a_k = \text{heavy atom bonded to } \ast_k ,
+  \qquad
+  m_{\text{bead}} = \frac{M_{\text{unit}}}{n_{\text{skel}}} .
+  \label{eq:granularity}
+\end{equation}
+Side groups are branches off that path and do not count.
+Table~\ref{tab:gran} gives the resulting values.
+
+\begin{caveat}
+\textbf{This was a real defect, and it is worth recording why.} An earlier
+version of PAAF placed one bead per \emph{repeat unit} at the RIS bond length
+$1.53$~\AA. Density came out correct, because density knows only about mass
+and volume. But the contour length was too short by a factor of
+$n_{\text{skel}}$, so every dimension derived from the chain path --- $R_g$,
+end-to-end distance, $C_n$ --- was too small by $\sqrt{n_{\text{skel}}}$:
+$\sqrt{2}$ for the vinyl polymers, $\sqrt{10}$ for poly(butylene succinate).
+A correct-looking density concealed it. The lesson generalises: check an
+observable that depends on the chain \emph{path}, not only one that depends on
+its mass.
+\end{caveat}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{llrrr}
+\toprule
+Polymer & Repeat unit SMILES & $n_{\text{skel}}$ & $M_{\text{unit}}$ & $m_{\text{bead}}$ \\
+\midrule
+Polyethylene            & \texttt{[*]CC[*]}                     & 2  & 28.05  & 14.03 \\
+Polypropylene           & \texttt{[*]CC([*])C}                  & 2  & 42.08  & 21.04 \\
+Polystyrene             & \texttt{[*]CC([*])c1ccccc1}           & 2  & 104.15 & 52.08 \\
+Poly(vinyl chloride)    & \texttt{[*]CC([*])Cl}                 & 2  & 62.50  & 31.25 \\
+Poly(ethylene oxide)    & \texttt{[*]OCC[*]}                    & 3  & 44.05  & 14.68 \\
+Poly(butylene succinate)& \texttt{[*]OCCCCOC(=O)CCC(=O)[*]}     & 10 & 172.18 & 17.22 \\
+\bottomrule
+\end{tabular}
+\caption{Skeletal granularity and masses derived from SMILES, in g/mol. Note
+that the phenyl ring of polystyrene is a branch and correctly contributes
+$0$ to $n_{\text{skel}}$.}
+\label{tab:gran}
+\end{table}
+
+\subsection{Repeat-unit mass from SMILES}
+
+All masses are computed from the SMILES with implicit hydrogens made explicit,
+and with one correction that is easy to get wrong. Stripping the \texttt{[*]}
+markers leaves a \emph{closed-shell} molecule: \texttt{[*]CC[*]} becomes
+\texttt{CC}, which a cheminformatics toolkit dutifully caps with hydrogen,
+giving ethane C$_2$H$_6$. But in a polymer those two carbons bond to
+neighbouring repeat units, not to hydrogen. The repeat unit is C$_2$H$_4$.
+PAAF therefore subtracts one hydrogen per attachment point,
+\begin{equation}
+  M_{\text{unit}} = \sum_{e} n_e\, m_e \;-\; n_{\ast}\, m_{\mathrm{H}} .
+  \label{eq:mass}
+\end{equation}
+Without this correction every mass is high by $1.008$ per connection ---
+$2.016$~g/mol for a linear unit, a $7\%$ error for polyethylene --- which
+would propagate directly into cell density and into every weight fraction.
+
+\subsection{Growth order}
+
+Chains enter the box one at a time, so whichever species is grown \emph{last}
+faces a box already at its final density. Taking species in the order the user
+happens to list them therefore makes success depend on an arbitrary choice: a
+$70/30$ PE/PS blend fails on the very first polystyrene chain, because 27
+polyethylene chains have already filled the box and a polystyrene bead has
+radius $2.74$~\AA{} against polyethylene's $1.77$.
+
+PAAF therefore chooses the order by difficulty,
+\begin{equation}
+  \text{rank} \;=\; n_{\text{beads}} \times R_{\text{bead}}^{3},
+  \qquad \text{descending},
+  \label{eq:order}
+\end{equation}
+so the hardest species claims the empty box and the easiest fills the gaps.
+The chosen order is reported in the result whenever it differs from the one
+the caller supplied. Atoms are \emph{assembled} in the
+caller's original order regardless, so that downstream consumers which slice
+the atom list by species are unaffected.
+
+\begin{caveat}
+This reordering is an engineering addition by PAAF, not part of
+Theodorou--Suter or Meirovitch, and is identified as such.
+\end{caveat}
+
+%======================================================================
+\section{Composition: from formulation to cell}
+\label{sec:composition}
+
+A formulation is specified in weight percent; the grower needs integer chain
+counts and a box edge. PAAF solves this explicitly rather than implicitly.
+
+Given target weight fractions $w_i$ and chain masses
+$m_i = M_{\text{unit},i}\,\mathrm{DP}_i$, the ideal fractional chain count is
+\begin{equation}
+  n_i = \frac{w_i\, M_{\text{total}}}{m_i} ,
+  \label{eq:counts}
+\end{equation}
+and the integers are chosen by largest remainder: floor everything, then
+allocate the leftover chains to whichever species is furthest below its
+target. Every species requested with non-zero weight receives at least one
+chain --- a ``5 wt\% additive'' that rounds to zero chains is not a 5 wt\%
+cell, and silently dropping it would be the worst available outcome.
+
+Dividing by $m_i$ in Eq.~\eqref{eq:counts} is essential and is the step most
+often got wrong. A $\mathrm{DP}=50$ polystyrene chain is $5\,208$~g/mol
+against $1\,403$ for polyethylene. Allocating chains in proportion to weight
+percent directly would give $7:3$ for a $70/30$ blend and a realised
+composition of $38.6$~wt\% PE. The correct solution is $18:2$, giving
+$70.80$~wt\%.
+
+The box edge follows from the target density $\rho$:
+\begin{equation}
+  a = \left(\frac{M_{\text{total}}}{N_A\,\rho}\right)^{1/3} \times 10^{8}\ \text{\AA} .
+  \label{eq:box}
+\end{equation}
+
+Because chain counts are integers, the realised composition is generally not
+the requested one. PAAF reports both, side by side, and states the error in
+percentage points rather than rounding silently. The error falls with cell
+size as Table~\ref{tab:comp} shows.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{rrrr}
+\toprule
+Target beads & Chains & Realised wt\% PE & Error (pp) \\
+\midrule
+400    & 5   & 51.86 & 18.14 \\
+2\,000  & 20  & 70.80 & 0.80 \\
+10\,000 & 100 & 70.80 & 0.80 \\
+40\,000 & 400 & 70.22 & 0.22 \\
+\bottomrule
+\end{tabular}
+\caption{Composition error against cell size for a requested 70/30 PE/PS blend
+at $\mathrm{DP}=50$. The error is a property of integers, not a defect;
+PAAF states it rather than concealing it.}
+\label{tab:comp}
+\end{table}
+
+%======================================================================
+\section{From skeletal beads to atoms}
+\label{sec:backmap}
+
+Growth produces skeletal atoms. No force-field typer can work with those: DL\_FIELD
+and Moltemplate need elements, hydrogens, side groups and bond orders. PAAF
+therefore back-maps, and it can do so cleanly \emph{because} a bead is a
+skeletal atom --- the backbone of the atomistic chain already exists, exactly,
+at positions the growth accepted.
+
+For each repeat unit PAAF embeds one 3D template: the repeat unit with its two
+attachment points converted to hydrogens, minimised with MMFF (falling back
+to UFF where MMFF typing fails). In that template
+each backbone atom has a local frame defined by its two backbone neighbours
+(a link hydrogen standing in at the unit ends). The same frame is built at the
+corresponding bead in the grown chain, and the rigid transform between them,
+\begin{equation}
+  \mathbf{R} = \mathbf{F}_{\text{target}}\,\mathbf{F}_{\text{template}}^{\mathsf{T}},
+  \qquad
+  \mathbf{x}'_k = \mathbf{p}_{\text{bead}} + \mathbf{R}\,
+  (\mathbf{x}_k - \mathbf{x}_{\text{backbone}}),
+  \label{eq:backmap}
+\end{equation}
+is applied to everything attached to that backbone atom. Because
+Eq.~\eqref{eq:backmap} is rigid, every substituent bond length and bond angle
+survives exactly.
+
+Verification: back-mapped formulae are exact --- a $\mathrm{DP}=n$
+polyethylene chain gives C$_{2n}$H$_{4n+2}$ and a polystyrene chain
+C$_{8n}$H$_{8n+2}$, confirmed for multi-chain cells --- and the backbone atoms
+land on the grown beads to within $1.8\times10^{-15}$~\AA.
+
+\paragraph{Push-off.} A hydrogen sits $1.09$~\AA{} from its carbon, so two
+backbone atoms at an acceptable separation can still leave their hydrogens
+nearly coincident. Handing a $0.3$~\AA{} contact to LAMMPS is how a
+minimisation explodes. PAAF therefore applies a purely geometric relief step
+in which \emph{only non-backbone atoms move}. It has two parts, and the order
+matters.
+
+First, each side group is \textbf{rotated rigidly} about the single bond
+joining it to the backbone. That rotation is exact --- every bond length, bond
+angle and internal torsion of the group is preserved, because the group moves
+as a body --- and it is the \emph{only} move that can help a ring. It is
+precisely the side-group torsion that growth does not sample, recovered here
+at negligible cost. Each rotatable group is scanned over 36 uniform angles and
+placed where a soft repulsive score against everything outside the group is
+smallest.
+
+Second, the remaining atoms are pushed apart, after which a SHAKE-style
+constraint relaxation restores \textbf{every} bond, including ring closures,
+to its original length.
+
+Measured: polyethylene $0.34 \rightarrow 1.65$~\AA{} (no rotatable groups);
+polystyrene $0.31 \rightarrow 1.00$~\AA{} with 20 phenyl groups rotated. Bond
+lengths after both steps span $1.087$--$1.530$~\AA{} for polystyrene and
+$1.094$--$1.530$~\AA{} for polyethylene, i.e.\ unchanged. Bond angles and
+inter-group torsions do drift; that is the price, and it is the cheap part of
+the geometry for a real minimiser to repair.
+
+\begin{caveat}
+\textbf{Bug history, recorded because the failure mode is instructive.}
+An earlier implementation pinned each mobile atom to a \emph{single} parent
+and re-projected onto that one bond. A spanning tree cannot constrain a cycle,
+so the ring-closing bond of every phenyl group was left completely free and
+was torn open to as much as $5.0$~\AA{} --- producing a structure that looked
+plausible and was chemically destroyed. Nothing caught it, because the only
+bond-length test in the suite used polyethylene, where every mobile atom is a
+hydrogen bonded directly to a pinned backbone carbon and a tree is therefore
+sufficient. \emph{Test the case that contains the cycle.}
+\end{caveat}
+
+\paragraph{Spearing, checked here.} Once the rings exist, the spearing test of
+Eq.~\eqref{eq:spear} can finally be applied. Rings are located by a
+depth-limited search for the shortest alternative path across each bond, then
+approximated as discs by singular-value decomposition of their atom positions.
+Every bond in the cell is tested against every ring under minimum image. A
+polystyrene cell at $1.04$~g/cm$^3$ contained 20 phenyl rings and \textbf{3
+speared bonds}; a polyethylene cell contains no rings and reports none. The
+count is attached to the result and raised as a warning.
+
+\paragraph{Tacticity.} Applying one template to every unit produces an
+\emph{isotactic} chain. This is a real stereochemical choice that changes
+properties, so PAAF exposes it rather than hiding it: \texttt{syndiotactic}
+alternates and \texttt{atactic} mirrors each unit's substituents through the
+local backbone plane at random, inverting the configuration at the
+stereocentre.
+
+%======================================================================
+\section{The algorithm, in full}
+\label{sec:algorithm}
+
+\begin{algobox}
+\algoreset
+\small
+\alg{\kw{input:} repeat-unit SMILES, DP and wt\% per species; target density $\rho$; temperature $T$}
+\alg{compute $M_{\text{unit}}$ (Eq.~\ref{eq:mass}) and $n_{\text{skel}}$ (Eq.~\ref{eq:granularity}) for each species}
+\alg{solve integer chain counts (Eq.~\ref{eq:counts}) and cubic box edge $a$ (Eq.~\ref{eq:box})}
+\alg{order species by difficulty (Eq.~\ref{eq:order})}
+\alg{\kw{for each} species $i$ in difficulty order:}
+\alg[1]{\kw{for each} chain of species $i$:}
+\alg[2]{\kw{for} attempt $=1 \dots N_{\text{restart}}$:}
+\alg[3]{seed three atoms at a random position having local free volume}
+\alg[3]{\kw{while} chain incomplete:}
+\alg[4]{\kw{for each} rotational isomeric state $s \in \{t, g^{+}, g^{-}\}$:}
+\alg[5]{place trial atom by NeRF (Eq.~\ref{eq:nerf})}
+\alg[5]{\kw{reject} if overlap (Eq.~\ref{eq:overlap}) or ring spearing (Eq.~\ref{eq:spear})}
+\alg[5]{evaluate $E^{\text{nb}}_{s}$ (Eq.~\ref{eq:softcore}); optionally look ahead (Eq.~\ref{eq:scan})}
+\alg[5]{$w_s \leftarrow U[j,s]\,\exp(-E^{\text{nb}}_{s}/k_BT)$}
+\alg[4]{\kw{if} all $w_s = 0$: \kw{restart chain} \quad\textit{(dead end --- attrition)}}
+\alg[4]{\kw{else}: sample $s$ from $w_s / \sum w$; accept the atom}
+\alg[2]{wrap the chain, insert into the neighbour cell list, record $R_g$, $R_{ee}$, $C_n$}
+\alg{assemble atoms in the \emph{caller's} species order, not the growth order}
+\alg{back-map to all-atom (Eq.~\ref{eq:backmap}); push off side-group overlaps}
+\alg{assign atom types; export LAMMPS via DL\_FIELD or Moltemplate}
+\end{algobox}
+\vspace{4pt}
+{\small\textbf{Algorithm 1:} PAAF amorphous cell construction.}
+
+%======================================================================
+\section{Validation}
+\label{sec:validation}
+
+Every physical claim PAAF makes is checked against an independent reference,
+and the measured value is printed rather than merely asserted. The suite
+comprises 442 tests, most of them a sweep of the whole polymer library; the GUI subset additionally requires PyQt5.
+
+\subsection{Chain dimensions against literature}
+
+Table~\ref{tab:cinf} is the load-bearing result. Deviations fall in both
+directions, which is what one expects from a genuine model rather than a
+fitted fudge factor.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{lrrrrrrl}
+\toprule
+Polymer & $E_\sigma$ & $E_\omega$ & $\theta$ & $C_\infty$ meas. & Ref. & Dev. & Source of parameters \\
+\midrule
+PE   & 0.50 & 2.10 & $112^\circ$ & $6.26 \pm 0.25$ & 6.7  & $-6.6\%$  & Flory 1969~\cite{flory1969} \\
+PP   & 0.20 & 1.65 & $114^\circ$ & $5.83 \pm 0.22$ & 5.5  & $+5.9\%$  & Suter \& Flory 1975~\cite{suter1975} \\
+PS   & 0.85 & 2.40 & $114^\circ$ & $8.90 \pm 0.38$ & 10.0 & $-11.0\%$ & Yoon \emph{et al.} 1975~\cite{yoon1975} \\
+PMMA & 0.70 & 2.20 & $116^\circ$ & $9.16 \pm 0.38$ & 8.2  & $+11.8\%$ & Sundararajan \& Flory 1974~\cite{sundararajan1974} \\
+\bottomrule
+\end{tabular}
+\caption{Characteristic ratio against tabulated values. Energies in kcal/mol,
+$T = 413$~K, 400 chains of 500 bonds each. The PP, PS and PMMA entries average
+over tacticity rather than modelling the meso/racemo distinction explicitly,
+which is the principal source of their deviation.}
+\label{tab:cinf}
+\end{table}
+
+\subsection{Convergence and internal consistency}
+
+$C_n$ must increase with chain length and level off, not sit flat.
+Measured for PE at 413~K: $5.01$ ($n=20$), $6.33$ ($50$), $6.30$ ($100$),
+$7.04$ ($200$), $7.21$ ($400$). Cooling must favour trans, and does:
+the trans fraction rises $0.573 \rightarrow 0.602 \rightarrow 0.643$ as
+$T$ falls $500 \rightarrow 400 \rightarrow 300$~K.
+
+\subsection{Coverage across the polymer library}
+
+Validating two polymers demonstrates that two polymers work. Every entry in
+PAAF's 124-polymer library is therefore driven through chemistry, growth and
+back-mapping, and each must either yield sound bond lengths or be refused with
+a specific reason. The sweep found real defects that PE and PS could not have
+exposed:
+
+\begin{itemize}
+\item \textbf{Poly(methyl methacrylate) could not be parsed at all.} Its
+      repeat unit \texttt{[*]CC([*])(C)C(=O)OC} has a quaternary backbone
+      carbon, so the tail after the second marker \emph{already} begins with a
+      branch. Wrapping it in another pair of parentheses produced
+      \texttt{CC((C)C(=O)OC)} --- a doubled bracket that is not valid SMILES.
+      One of the four polymers whose RIS parameters this report tabulates
+      could not have its mass computed. Fixed by peeling the leading balanced
+      branches before parenthesising the remainder; PMMA now gives
+      $100.12$~g/mol (C$_5$H$_8$O$_2$), exact.
+\item \textbf{Poly(dimethylsiloxane) crashed.} Both attachment points sit on
+      the same silicon, and RDKit raises an invariant violation when asked for
+      the shortest path from an atom to itself. The single-skeletal-atom case
+      is now handled directly; PDMS gives Si$_{16}$C$_{32}$H$_{100}$ for
+      2 chains of $\mathrm{DP}=8$, exact.
+\item \textbf{24 polymers have a ring in the backbone} and were silently
+      producing torn structures with bonds up to $11.9$~\AA. They are now
+      refused with a specific explanation (limitation L9).
+\item \textbf{One library entry, MAH, carries a non-polymerisable SMILES} in
+      its polymerisation field. This is a data defect rather than a code
+      defect and is asserted against so it cannot spread unnoticed.
+\end{itemize}
+
+\subsection{Cell-level checks}
+
+\begin{itemize}
+\item \textbf{Density.} Target densities are reached exactly: $0.8500$,
+      $0.8800$, $0.9000$, $0.9500$, $1.0400$~g/cm$^3$ all realised to four
+      decimal places, because the box is sized analytically from
+      Eq.~\eqref{eq:box}. Of these, $0.85$ and $1.04$ are reached with
+      unbiased sampling; $0.88$, $0.90$ and $0.95$ come from tests that
+      enable $k=1$.
+\item \textbf{Geometry preserved under growth.} Bond length
+      $1.530000 \pm 1.4\times10^{-15}$~\AA, angle
+      $112.0000 \pm 5.1\times10^{-14}\,^\circ$ in a packed cell.
+\item \textbf{No overlaps.} Minimum non-bonded distance under minimum image
+      measured at $2.002$~\AA{} for a requested tolerance of $2.0$~\AA.
+\item \textbf{Spearing predicate.} Unit-tested against four geometric cases:
+      straight through, passing beside, parallel to the ring plane, and
+      stopping short.
+\item \textbf{Reproducibility.} Identical seed gives identical coordinates to
+      $0.00\times10^{0}$~\AA{} maximum difference.
+\item \textbf{Melt-level $C_n$.} Polystyrene in a cell at $0.95$~g/cm$^3$
+      gives $11.13$ against a reference $C_\infty$ of $10.0$.
+\end{itemize}
+
+%======================================================================
+\section{Limitations}
+\label{sec:limitations}
+
+This section exists because a reader will ask these questions, and answering
+them first is stronger than being caught by them.
+
+\begin{enumerate}[label=\textbf{L\arabic*.}]
+
+\item \textbf{Construction only --- there is no energy minimisation.}
+BIOVIA describes Amorphous Cell as two steps: an initial guess structure,
+\emph{followed by relaxation to a state of minimum potential
+energy}~\cite{biovia}. PAAF performs only the first. The geometric push-off of
+Section~\ref{sec:backmap} makes the structure safe to hand to a minimiser; it
+is not itself a minimisation and involves no force field. \emph{Users must
+minimise and equilibrate in LAMMPS before quoting any property from a PAAF
+cell.} This is the single largest gap between PAAF and a production tool.
+
+\item \textbf{Growth is at united-skeletal-atom resolution.}
+Theodorou and Suter place every pendant atom and sample side-group torsions
+for vinyl polymers. PAAF grows the backbone and reconstructs side groups
+afterwards from a single template rotamer, then rotates each group about its
+own bond to relieve overlap. That rotation recovers one degree of freedom
+exactly, but it is a greedy clash-relief step, \emph{not} Boltzmann sampling
+of the side-group torsion: the resulting rotamer distribution has no claim to
+be the equilibrium one. Properties that depend on side-group packing should
+not be taken from an unequilibrated PAAF cell.
+
+\item \textbf{Spearing is detected but cannot be prevented.}
+Because rings do not exist until back-mapping, a speared ring can only be
+reported after the fact, not rejected during growth. This is not hypothetical:
+a polystyrene cell at $1.04$~g/cm$^3$ contained 3 speared bonds among 20
+rings. PAAF raises a warning; the user must rebuild with a different seed or
+at lower density. A full-atomistic grower would reject these as they arise.
+
+\item \textbf{The non-bonded term is generic, not the production force field.}
+Equation~\eqref{eq:softcore} is a soft repulsion, not the Lennard-Jones and
+electrostatic terms of the force field that will later be applied. Materials
+Studio uses the real force field during growth.
+
+\item \textbf{RIS parameters exist for four polymers.}
+PE, PP, PS and PMMA carry literature parameterisations. Every other polymer
+falls back to a generic three-state model, which PAAF labels
+\texttt{is\_generic} and flags in the result as ``chain dimensions are
+qualitative, not a quantitative prediction''. It is honest, but it means the
+RIS advantage does not extend to arbitrary chemistry. This is the most
+consequential limitation for a user working outside the four.
+
+\item \textbf{Tacticity is averaged in the RIS parameters.}
+PP, PS and PMMA use a single averaged state set in place of the meso/racemo
+distinction of the published treatments, which is the main reason PMMA reads
+$+11.8\%$.
+
+\item \textbf{Scanning is biased and therefore off by default.}
+See Section~\ref{sec:growth}. The Rosenbluth weight is not carried, so
+$k>0$ cells must not be used to quote chain dimensions.
+
+\item \textbf{Sequential construction over-extends chains by roughly 20\%.}
+Chains grow into a box that starts empty, so later chains encounter free
+volume more open and more connected than a real melt's, and
+Eq.~\eqref{eq:growth} then favours the extended conformations that fit it.
+Measured for PE at $0.85$~g/cm$^3$, $\mathrm{DP}=60$: $C_n = 8.79$ in the cell
+against $7.26$ for the same chain grown in isolation. Real melts screen
+excluded volume and sit near unperturbed dimensions, so a constructed cell's
+$C_n$ should be treated as an upper bound and re-measured after equilibration.
+
+\item \textbf{Linear chains only.} No branching, no polydispersity, no
+dissolved small molecules, no layered or oriented phases --- all of which
+Materials Studio supports~\cite{biovia,accelrys}.
+
+\item \textbf{Backbone rings are refused, not supported.} Back-mapping assumes
+the groups hanging off the backbone are \emph{trees}. A ring \emph{in} the
+backbone --- poly(ethylene terephthalate), polycarbonate, PBAT --- is a cycle
+spanning several skeletal atoms whose internal geometry is fixed by the ring,
+not by the RIS bond length and angle the growth used. The two are
+incompatible. \textbf{24 of the 123 usable library polymers} are of this kind.
+PAAF now detects them and raises a specific error; growth and coarse-grained
+export still work, since a bead is a skeletal atom either way, but no all-atom
+cell and therefore no force field is possible. Pendant rings (polystyrene) are
+unaffected.
+
+\item \textbf{The cell must be larger than twice the longest repeat unit.}
+Minimum image requires it. A repeat unit with a long side chain --- an
+octyloxy group is $11.1$~\AA{} across --- violates it in a small cell, and
+bonds measured across the boundary are then wrapped to the wrong periodic
+image. Measured for \texttt{[*]C(OCCCCCCCC)C[*]}: bonds up to $12.29$~\AA{} at
+2 chains of $\mathrm{DP}=6$ (box $15.4$~\AA), and $1.093$--$1.532$~\AA{} for
+the same polymer at 4 chains of $\mathrm{DP}=20$ (box $29.0$~\AA). The
+structure was never wrong; the cell was too small to describe it. PAAF now
+compares the template extent against half the box and warns.
+
+\item \textbf{Some library SMILES layouts are not expanded reliably.}
+The $n$-mer expansion recognises the two common layouts, \texttt{[*]A[*]} and
+\texttt{[*]A([*])B}. Entries that put a marker inside a branch, use a bare
+\texttt{*}, or do not begin with a marker fall back to stripping the markers
+and repeating, which is not always correct, and log a warning when they do.
+Repeat-unit \emph{masses} are unaffected because they need only one unit.
+\end{enumerate}
+
+%======================================================================
+\section{Relation to existing tools, and an honest novelty assessment}
+\label{sec:novelty}
+
+\subsection{Comparison}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{p{4.3cm}p{4.6cm}p{5.2cm}}
+\toprule
+ & \textbf{Materials Studio} & \textbf{PAAF} \\
+\midrule
+Growth method    & Theodorou--Suter + Meirovitch & same \\
+Chain statistics & RIS & RIS, validated against literature $C_\infty$ \\
+Resolution       & full atomistic & united skeletal atoms, then back-mapped \\
+Non-bonded during growth & production force field & generic soft repulsion \\
+After construction & relaxes to potential-energy minimum & \emph{nothing} \\
+System types     & polydisperse, branched, gases, layers, nematics & linear homopolymers and blends \\
+Licence          & proprietary & open, scriptable, seed-reproducible \\
+\bottomrule
+\end{tabular}
+\caption{PAAF against BIOVIA Materials Studio Amorphous Cell~\cite{biovia,accelrys}.}
+\end{table}
+
+Among open-source tools, RadonPy~\cite{radonpy} automates SMILES $\rightarrow$
+amorphous cell $\rightarrow$ MD $\rightarrow$ properties, pysimm~\cite{pysimm}
+provides polymer construction into LAMMPS, and SPACIER~\cite{spacier} builds
+on RadonPy for machine-learning-driven design. These construct cells
+predominantly by self-avoiding random walk with packing and compression,
+relying on extended equilibration to relax chain dimensions, rather than by
+RIS-weighted growth.
+
+\subsection{Novelty}
+
+Stated plainly: \textbf{the method implemented here is not novel.} It is a
+faithful reimplementation of Theodorou--Suter (1985) and Meirovitch (1983) on
+Flory's RIS foundation (1969). Nothing in the growth algorithm would survive a
+novelty assessment. The composition solver, the difficulty ordering and the
+back-mapping are competent engineering, not new science.
+
+What is arguably underserved is the combination: \emph{RIS-correct
+construction in an open-source tool}. Materials Studio has it and is closed;
+the widely used open tools largely do not. That suggests one testable claim,
+which would need to be demonstrated rather than asserted:
+
+\begin{quote}
+A cell built with RIS statistics begins nearer the correct chain dimensions
+and therefore reaches equilibrium in less MD time than a random-walk cell of
+identical composition.
+\end{quote}
+
+Testing it requires building matched systems by both routes, running NPT
+equilibration, and tracking $C_\infty$ and $R_g$ against simulation time. If
+the crossover is substantial, that is a modest and publishable software
+result. If it is not, the tool's value is convenience and transparency rather
+than physics --- which is worth establishing before making any claim.
+
+Two developments would constitute genuine contributions. The first, and
+stronger: \textbf{deriving RIS parameters automatically from SMILES} by
+torsion scanning a trimer fragment at MMFF, GFN2-xTB or DFT level and fitting
+$E_\sigma$, $E_\omega$ and the state angles. This would extend RIS-correct
+construction from four polymers to arbitrary chemistry and would remove
+limitation~L4, which is the one that most restricts the method's usefulness.
+The second: carrying the Rosenbluth weight through scanning so that dense
+cells and unbiased chain dimensions can be obtained simultaneously, removing
+limitation~L6.
+
+%======================================================================
+\begin{thebibliography}{99}
+\small
+
+\bibitem{ts1985}
+D.~N. Theodorou and U.~W. Suter,
+\emph{Detailed molecular structure of a vinyl polymer glass},
+Macromolecules \textbf{18} (1985) 1467--1478.
+
+\bibitem{meirovitch1983}
+H.~Meirovitch,
+\emph{Computer simulation of self-avoiding walks: Testing the scanning method},
+J. Chem. Phys. \textbf{79} (1983) 502--508.
+
+\bibitem{flory1969}
+P.~J. Flory,
+\emph{Statistical Mechanics of Chain Molecules},
+Interscience, New York, 1969.
+
+\bibitem{mattice1994}
+W.~L. Mattice and U.~W. Suter,
+\emph{Conformational Theory of Large Molecules: The Rotational Isomeric State
+Model in Macromolecular Systems},
+Wiley, New York, 1994.
+
+\bibitem{suter1975}
+U.~W. Suter and P.~J. Flory,
+\emph{Conformational energy and configurational statistics of polypropylene},
+Macromolecules \textbf{8} (1975) 765--776.
+
+\bibitem{yoon1975}
+D.~Y. Yoon, P.~R. Sundararajan and P.~J. Flory,
+\emph{Conformational characteristics of polystyrene},
+Macromolecules \textbf{8} (1975) 776--783.
+
+\bibitem{sundararajan1974}
+P.~R. Sundararajan and P.~J. Flory,
+\emph{Configurational characteristics of poly(methyl methacrylate)},
+J. Am. Chem. Soc. \textbf{96} (1974) 5025--5031.
+
+\bibitem{rosenbluth1955}
+M.~N. Rosenbluth and A.~W. Rosenbluth,
+\emph{Monte Carlo calculation of the average extension of molecular chains},
+J. Chem. Phys. \textbf{23} (1955) 356--359.
+
+\bibitem{grassberger1997}
+P.~Grassberger,
+\emph{Pruned-enriched Rosenbluth method: Simulations of $\theta$ polymers of
+chain length up to 1\,000\,000},
+Phys. Rev. E \textbf{56} (1997) 3682--3693.
+
+\bibitem{biovia}
+BIOVIA,
+\emph{What Does BIOVIA Materials Studio Amorphous Cell Do?},
+Dassault Syst\`emes.
+\url{https://www.3ds.com/assets/invest/2023-10/biovia-material-studio-amorphous-cell.pdf}
+
+\bibitem{accelrys}
+Accelrys,
+\emph{Amorphous\_Cell Module}, Polymer User Guide.
+\url{http://www.esi.umontreal.ca/accelrys/materials/insight400P/polymer/03-AC.html}
+
+\bibitem{radonpy}
+Y.~Hayashi \emph{et al.},
+\emph{RadonPy: automated physical property calculation using all-atom
+classical molecular dynamics simulations for polymer informatics},
+npj Comput. Mater. \textbf{8} (2022) 222.
+
+\bibitem{pysimm}
+M.~E. Fortunato and C.~M. Colina,
+\emph{pysimm: A python package for simulation of molecular systems},
+SoftwareX \textbf{6} (2017) 7--12.
+
+\bibitem{spacier}
+H.~Arai \emph{et al.},
+\emph{SPACIER: on-demand polymer design with fully automated all-atom
+classical molecular dynamics integrated into machine learning pipelines},
+npj Comput. Mater. \textbf{10} (2024).
+
+\bibitem{parsons1994}
+D.~F. Parsons, D.~R.~M. Williams \emph{et al.};
+see also J.~Gasteiger and T.~Engel (eds.),
+\emph{Chemoinformatics}, Wiley-VCH, 2003, for the NeRF internal-coordinate
+construction used in Eq.~\eqref{eq:nerf}.
+
+\end{thebibliography}
+
+\end{document}

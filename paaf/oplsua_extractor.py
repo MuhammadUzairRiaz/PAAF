@@ -1,0 +1,284 @@
+"""Extract the united-atom subset of `oplsaa2024.lt` into a standalone
+`oplsua_2024.lt` Moltemplate force field.
+
+Background
+----------
+Moltemplate's `oplsaa2024.lt` bundles both the modern all-atom OPLS 2024
+parameters *and* the historical united-atom parameters (types 66-134,
+labeled inside the file). Users who want a genuine OPLS united-atom
+simulation had to inherit from `OPLSAA` and then avoid all-atom types by
+hand.
+
+This module reads `oplsaa2024.lt` and emits a new `.lt` file containing:
+
+  * A brand new object ``OPLSUA_2024`` (does not inherit OPLSAA).
+  * `In Charges` and `Data Masses` entries only for atom types in the UA
+    range (66-134 by default; the file itself labels this block as UA).
+  * `pair_coeff` lines for those UA atom types.
+  * `bond_coeff / angle_coeff / dihedral_coeff / improper_coeff` lines whose
+    ALL class-equivalence tokens (the letters after `_b`, `_a`, `_d`, `_i`
+    in an `@atom:X_bY_aZ_dW_iV` tag) appear in the UA subset's class set.
+  * `Data Bonds/Angles/Dihedrals/Impropers By Type` rules keyed by the same
+    filtered bond/angle/dihedral names.
+  * The original `In Init` block (units, styles, kspace) verbatim so the UA
+    force field is a drop-in replacement.
+
+The result is a self-contained UA force field with only atom types that
+make sense in a united-atom simulation, plus every parameter and typing
+rule needed to actually run one.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, List, Optional, Set, Tuple
+
+from .logging_utils import get_logger
+
+log = get_logger(__name__)
+
+# The file's own comment states: "Types 66-134 include UA parameters".
+DEFAULT_UA_RANGE: Set[int] = set(range(66, 135))
+
+
+# ---------------------------------------------------------------- regexes
+_RE_CHARGE = re.compile(r"^\s*set\s+type\s+@atom:(\d+)\s+charge\s+(\S+)(.*)$")
+_RE_MASS = re.compile(r"^\s*@atom:(\d+)\s+(\S+)\s*$")
+_RE_PAIR = re.compile(
+    r"^\s*pair_coeff\s+@atom:(\d+)_b(\S+?)_a(\S+?)_d(\S+?)_i(\S+?)"
+    r"\s+@atom:(\d+)_b(\S+?)_a(\S+?)_d(\S+?)_i(\S+?)\s+(.*)$"
+)
+_RE_BOND_COEFF = re.compile(r"^\s*bond_coeff\s+@bond:(\S+)\s+(.*)$")
+_RE_ANGLE_COEFF = re.compile(r"^\s*angle_coeff\s+@angle:(\S+)\s+(.*)$")
+_RE_DIH_COEFF = re.compile(r"^\s*dihedral_coeff\s+@dihedral:(\S+)\s+(.*)$")
+_RE_IMP_COEFF = re.compile(r"^\s*improper_coeff\s+@improper:(\S+)\s+(.*)$")
+_RE_BBT = re.compile(r"^\s*@bond:(\S+)\s+@atom:.*$")
+_RE_ABT = re.compile(r"^\s*@angle:(\S+)\s+@atom:.*$")
+_RE_DBT = re.compile(r"^\s*@dihedral:(\S+)\s+@atom:.*$")
+_RE_IBT = re.compile(r"^\s*@improper:(\S+)\s+@atom:.*$")
+
+
+# ---------------------------------------------------------------- parsing
+@dataclass
+class OplsClasses:
+    bond: Set[str]
+    angle: Set[str]
+    dihedral: Set[str]
+    improper: Set[str]
+
+
+def _scan_classes(lines: List[str], ua: Set[int]) -> OplsClasses:
+    """Look at every pair_coeff line, and for each atom whose numeric type is
+    in the UA subset, record its bond/angle/dihedral/improper class codes."""
+    bond: Set[str] = set()
+    angle: Set[str] = set()
+    dihedral: Set[str] = set()
+    improper: Set[str] = set()
+    for line in lines:
+        m = _RE_PAIR.match(line)
+        if not m:
+            continue
+        n1, b1, a1, d1, i1, n2, b2, a2, d2, i2, _ = m.groups()
+        for n, bb, aa, dd, ii in ((int(n1), b1, a1, d1, i1), (int(n2), b2, a2, d2, i2)):
+            if n in ua:
+                bond.add(bb); angle.add(aa); dihedral.add(dd); improper.add(ii)
+    log.info("UA class sets: %d bond, %d angle, %d dihedral, %d improper",
+             len(bond), len(angle), len(dihedral), len(improper))
+    return OplsClasses(bond, angle, dihedral, improper)
+
+
+def _classes_of(name: str) -> Tuple[str, ...]:
+    """Split `A_B`, `A_B_C`, `A_B_C_D` into tuple of tokens."""
+    return tuple(name.split("_"))
+
+
+def _matches(classes: Iterable[str], allowed: Set[str]) -> bool:
+    return all(c in allowed for c in classes)
+
+
+# ---------------------------------------------------------------- extractor
+def extract(
+    source: str | Path,
+    dest: str | Path,
+    ua_range: Optional[Set[int]] = None,
+    object_name: str = "OPLSUA_2024",
+) -> Path:
+    """Write a UA-only Moltemplate .lt file derived from `source`."""
+    source = Path(source); dest = Path(dest)
+    ua = ua_range or DEFAULT_UA_RANGE
+    log.info("Extracting UA subset (%d types) from %s", len(ua), source.name)
+
+    lines = source.read_text().splitlines()
+
+    # 1) Get the class codes for the UA atoms from pair_coeff lines.
+    cls = _scan_classes(lines, ua)
+
+    # 2) Walk the file and either keep, filter, or replace each section.
+    out: List[str] = []
+    section: Optional[str] = None
+    subsection_open = False
+    kept_bond_names: Set[str] = set()
+    kept_angle_names: Set[str] = set()
+    kept_dih_names: Set[str] = set()
+    kept_imp_names: Set[str] = set()
+
+    # Header
+    out.append("# Auto-generated by paaf.oplsua_extractor")
+    out.append(f"# Source: {source.name}")
+    out.append(f"# UA atom type range: {min(ua)}-{max(ua)} ({len(ua)} types)")
+    out.append("#")
+    out.append(f"{object_name} {{")
+    out.append("")
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Detect (and rename) the outer object header
+        m = re.match(r"^\s*OPLSAA\s*\{\s*$", line)
+        if m and section is None:
+            i += 1
+            continue
+
+        # Detect start of each named write_once section
+        m = re.match(r"^\s*write_once\(\s*\"([^\"]+)\"\s*\)\s*\{", line)
+        if m:
+            section = m.group(1)
+            out.append(line)
+            i += 1
+            continue
+
+        if stripped.startswith("}"):
+            # Some sections have an explicit comment after }
+            if section is not None:
+                out.append(line)
+                section = None
+                i += 1
+                continue
+
+        # ---- CONTENT lines dispatched by section ----
+        if section == "In Charges":
+            m = _RE_CHARGE.match(line)
+            if m:
+                n = int(m.group(1))
+                if n in ua:
+                    out.append(line)
+                i += 1
+                continue
+            # Preserve comments inside In Charges
+            out.append(line); i += 1; continue
+
+        if section == "Data Masses":
+            m = _RE_MASS.match(line)
+            if m:
+                n = int(m.group(1))
+                if n in ua:
+                    out.append(line)
+                i += 1
+                continue
+            out.append(line); i += 1; continue
+
+        if section == "In Settings":
+            # pair_coeff
+            m = _RE_PAIR.match(line)
+            if m:
+                n1, _b1, _a1, _d1, _i1, n2, _b2, _a2, _d2, _i2, _rest = m.groups()
+                if int(n1) in ua and int(n2) in ua:
+                    out.append(line)
+                i += 1
+                continue
+            # bond_coeff / angle_coeff / dihedral_coeff / improper_coeff
+            m = _RE_BOND_COEFF.match(line)
+            if m:
+                name = m.group(1)
+                if _matches(_classes_of(name), cls.bond):
+                    out.append(line)
+                    kept_bond_names.add(name)
+                i += 1; continue
+            m = _RE_ANGLE_COEFF.match(line)
+            if m:
+                name = m.group(1)
+                if _matches(_classes_of(name), cls.angle):
+                    out.append(line)
+                    kept_angle_names.add(name)
+                i += 1; continue
+            m = _RE_DIH_COEFF.match(line)
+            if m:
+                name = m.group(1)
+                if _matches(_classes_of(name), cls.dihedral):
+                    out.append(line)
+                    kept_dih_names.add(name)
+                i += 1; continue
+            m = _RE_IMP_COEFF.match(line)
+            if m:
+                name = m.group(1)
+                if _matches(_classes_of(name), cls.improper):
+                    out.append(line)
+                    kept_imp_names.add(name)
+                i += 1; continue
+            # Preserve blank/comment lines inside In Settings
+            out.append(line); i += 1; continue
+
+        if section == "Data Bonds By Type":
+            m = _RE_BBT.match(line)
+            if m and m.group(1) in kept_bond_names:
+                out.append(line)
+            elif stripped == "" or stripped.startswith("#"):
+                out.append(line)
+            i += 1; continue
+
+        if section == "Data Angles By Type":
+            m = _RE_ABT.match(line)
+            if m and m.group(1) in kept_angle_names:
+                out.append(line)
+            elif stripped == "" or stripped.startswith("#"):
+                out.append(line)
+            i += 1; continue
+
+        if section == "Data Dihedrals By Type":
+            m = _RE_DBT.match(line)
+            if m and m.group(1) in kept_dih_names:
+                out.append(line)
+            elif stripped == "" or stripped.startswith("#"):
+                out.append(line)
+            i += 1; continue
+
+        if "Impropers By Type" in (section or ""):
+            m = _RE_IBT.match(line)
+            if m and m.group(1) in kept_imp_names:
+                out.append(line)
+            elif stripped == "" or stripped.startswith("#"):
+                out.append(line)
+            i += 1; continue
+
+        if section == "In Init":
+            out.append(line); i += 1; continue
+
+        # Fallback: preserve blank lines and top-level comments only
+        if stripped == "" or stripped.startswith("#"):
+            out.append(line)
+        i += 1
+
+    # Close the outer object
+    out.append("")
+    out.append(f"}} # {object_name}")
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("\n".join(out) + "\n")
+    log.info(
+        "Wrote %s: %d bond types, %d angle types, %d dihedral types, %d improper types",
+        dest, len(kept_bond_names), len(kept_angle_names),
+        len(kept_dih_names), len(kept_imp_names),
+    )
+    return dest
+
+
+# ---------------------------------------------------------------- CLI convenience
+def default_source() -> Path:
+    return Path(__file__).resolve().parent.parent / "ff_libraries" / "moltemplate" / "oplsaa2024.lt"
+
+
+def default_dest() -> Path:
+    return Path(__file__).resolve().parent.parent / "ff_libraries" / "moltemplate" / "oplsua_2024.lt"

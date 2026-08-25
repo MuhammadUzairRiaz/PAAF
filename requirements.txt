@@ -1,0 +1,18 @@
+# Core (pip-installable)
+numpy>=1.20
+scipy>=1.7
+networkx>=2.6
+pyyaml>=6.0
+PyQt5>=5.15
+
+# Chemistry stack — install via conda-forge (pip wheels are unreliable
+# for these on many platforms):
+#
+#   conda install -c conda-forge rdkit openbabel mbuild
+#
+# RDKit  : REQUIRED — amorphous cell back-mapping, reaction scheme, SMILES.
+# mbuild : REQUIRED — chain building from monomers.
+# OpenBabel: recommended — mol2 export, extra file formats, UFF fallback.
+
+# Development
+pytest>=7.0

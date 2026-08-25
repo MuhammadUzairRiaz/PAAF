@@ -1,0 +1,30 @@
+# Polyethylene, TraPPE united-atom (CH2/CH3 pseudo-atoms)
+project_name: PE_50mer_trappe
+output_dir: ./mta_output
+
+monomers:
+  - file: ./examples/monomers/ethylene_ua.xyz
+    name: CH2CH2
+
+optimizer:
+  enabled: true
+  ff: UFF                # OpenBabel FF for UA structures
+  steps: 5000
+
+chain:
+  n_monomers: 50
+  mode: homopolymer
+  backend: simple
+
+box:
+  n_chains: 20
+  size: [100, 100, 100]
+
+force_field:
+  key: trappe_ua
+
+lammps:
+  ensemble: nvt
+  temperature: 500.0
+  steps: 1000000
+  timestep: 2.0

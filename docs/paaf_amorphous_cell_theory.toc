@@ -1,0 +1,31 @@
+\contentsline {section}{\numberline {1}Why growth rather than insertion}{2}{section.1}%
+\contentsline {section}{\numberline {2}Rotational isomeric state theory}{2}{section.2}%
+\contentsline {subsection}{\numberline {2.1}The three-state model}{2}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Exact finite-chain sampling}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Chain geometry}{3}{subsection.2.3}%
+\contentsline {subsection}{\numberline {2.4}The characteristic ratio, and why it is the test}{4}{subsection.2.4}%
+\contentsline {section}{\numberline {3}Growth into the periodic cell}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}The growth probability}{4}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}The non-bonded term}{4}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Hard rejection: overlap and spearing}{5}{subsection.3.3}%
+\contentsline {paragraph}{Overlap.}{5}{section*.3}%
+\contentsline {paragraph}{Ring spearing.}{5}{section*.4}%
+\contentsline {subsection}{\numberline {3.4}Meirovitch scanning and the Rosenbluth bias}{6}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Growth granularity: one bead per skeletal atom}{6}{subsection.3.5}%
+\contentsline {subsection}{\numberline {3.6}Repeat-unit mass from SMILES}{7}{subsection.3.6}%
+\contentsline {subsection}{\numberline {3.7}Growth order}{7}{subsection.3.7}%
+\contentsline {section}{\numberline {4}Composition: from formulation to cell}{8}{section.4}%
+\contentsline {section}{\numberline {5}From skeletal beads to atoms}{8}{section.5}%
+\contentsline {paragraph}{Push-off.}{9}{section*.8}%
+\contentsline {paragraph}{Spearing, checked here.}{9}{section*.9}%
+\contentsline {paragraph}{Tacticity.}{9}{section*.10}%
+\contentsline {section}{\numberline {6}The algorithm, in full}{10}{section.6}%
+\contentsline {section}{\numberline {7}Validation}{10}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Chain dimensions against literature}{10}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}Convergence and internal consistency}{10}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}Coverage across the polymer library}{11}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}Cell-level checks}{11}{subsection.7.4}%
+\contentsline {section}{\numberline {8}Limitations}{11}{section.8}%
+\contentsline {section}{\numberline {9}Relation to existing tools, and an honest novelty assessment}{13}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Comparison}{13}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}Novelty}{13}{subsection.9.2}%

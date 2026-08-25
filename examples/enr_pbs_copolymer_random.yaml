@@ -1,0 +1,33 @@
+# Random copolymer of ENR and PBS units – mirrors the user's create_chain_enr_fixed.py
+project_name: ENR_PBS_random
+output_dir: ./mta_output
+
+monomers:
+  - file: ./examples/monomers/ENR.pdb
+    name: ENR
+    # supply Avogadro indices for the two connection heavy atoms + Hs to drop
+  - file: ./examples/monomers/PBS_monomer.pdb
+    name: PBS
+    head: 1
+    tail: 25
+    head_h: 3
+    tail_h: 14
+
+chain:
+  n_monomers: 40
+  mode: random
+  fractions: [0.5, 0.5]
+  seed: 12345
+  backend: simple
+
+force_field:
+  key: gaff       # uses antechamber for atom typing; set to oplsaa to avoid.
+
+box:
+  n_chains: 5
+  size: [90, 90, 90]
+
+lammps:
+  ensemble: npt
+  temperature: 300.0
+  steps: 500000

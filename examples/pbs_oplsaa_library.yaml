@@ -1,0 +1,79 @@
+# Poly(butylene succinate), built the way that actually works.
+#
+# The point of this file over examples/pbs_oplsaa.yaml is that it names NO
+# head/tail atom indices. It does not need to: the monomer PAAF writes when you
+# pick PBS from the library comes with a sidecar file
+#
+#     scratch/monomers/pbs_slot0.pdb.polysmi   ->  [*]OCCCCOC(=O)CCC(=O)[*]
+#
+# and those [*] markers tell PAAF which atoms are the connection points. Hand
+# indices go stale the moment the monomer is regenerated with a different atom
+# order; the sidecar cannot.
+#
+# What PAAF works out from it, verified on the generated file:
+#
+#     head = O1  (the alcohol oxygen)   cap removed = H13
+#     tail = C11 (the carbonyl carbon)  cap removed = H26
+#     link = C11-O1, i.e. an ESTER
+#
+# Why the monomer looks like an aldehyde
+# --------------------------------------
+# PAAF joins units by deleting ONE hydrogen from each end and bonding what is
+# left. For an ester the tail therefore has to present a hydrogen on the
+# carbonyl carbon, which makes the isolated monomer OCCCCOC(=O)CCC(=O) — an
+# aldehyde. That hydrogen is a linking device, not a chemistry claim: once the
+# chain is assembled, cap_carboxyl_end turns the terminal -C(=O)H into the real
+# -C(=O)OH. The finished chain has one alcohol end and one carboxylic acid end.
+#
+# Do NOT put OCCCCOC(=O)CCC(=O)O in as the monomer. It is the correct molecule
+# and the wrong input: its acid carbon has no hydrogen to remove, so the only
+# removable hydrogens are on two oxygens and the units link O-O into a
+# peroxide. PAAF now warns when it sees this, but the way to avoid it is to
+# start from the library entry.
+#
+# Usage:
+#     python -m paaf.cli run examples/pbs_oplsaa_library.yaml
+# after picking PBS on the Builder page once, so the monomer file exists.
+
+project_name: PBS_20mer_oplsaa
+output_dir: ./mta_output
+
+monomers:
+  # Written by the Builder page when you pick PBS from the library. Keep the
+  # .polysmi sidecar next to it — deleting it drops PAAF back to a geometry
+  # guess for head/tail.
+  - file: ./scratch/monomers/pbs_slot0.pdb
+    name: PBS
+
+optimizer:
+  enabled: true
+  ff: MMFF94
+  steps: 20000
+  algorithm: cg
+
+chain:
+  n_monomers: 20
+  mode: homopolymer
+  backend: auto            # SMILES/mBuild builder; falls back if unavailable
+  cap_carboxyl_end: true   # -C(=O)H  ->  -C(=O)OH once the chain is built
+
+box:
+  n_chains: 5
+  # Size from the target density rather than a guessed edge length. PBS is
+  # ~1.26 g/cm3 experimentally; a fixed 80 A box with 5 chains would be far
+  # too dilute to equilibrate sensibly.
+  use_density: true
+  density_g_cm3: 1.26
+  packmol: true
+
+force_field:
+  key: oplsaa
+
+lammps:
+  ensemble: npt
+  temperature: 300.0
+  pressure: 1.0
+  steps: 500000
+  timestep: 1.0
+
+run_moltemplate: true

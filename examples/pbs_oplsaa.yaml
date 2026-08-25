@@ -1,0 +1,39 @@
+# Poly(butylene succinate) – 20 monomer chain, all-atom OPLS
+project_name: PBS_20mer_oplsaa
+output_dir: ./mta_output
+
+monomers:
+  - file: /Users/uzair/project/moltemplate_auto/examples/monomers/PBS_monomer.pdb
+    name: PBS
+    # From Avogadro (1-based) — matches the user's build_pbs_mbuild_correct.py:
+    head: 1        # carbonyl C
+    tail: 25       # terminal alcohol O
+    head_h: 3      # acid OH hydrogen (removed when linking)
+    tail_h: 14     # terminal alcohol H
+
+optimizer:
+  enabled: true
+  ff: MMFF94
+  steps: 20000
+  algorithm: cg
+
+chain:
+  n_monomers: 20
+  mode: homopolymer
+  backend: mbuild
+
+box:
+  n_chains: 5
+  size: [80, 80, 80]
+
+force_field:
+  key: oplsaa
+
+lammps:
+  ensemble: npt
+  temperature: 300.0
+  pressure: 1.0
+  steps: 500000
+  timestep: 1.0
+
+run_moltemplate: true
