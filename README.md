@@ -31,7 +31,7 @@ simulation-ready LAMMPS or GROMACS system, end to end:
 conda create -n paaf python=3.11
 conda activate paaf
 conda install -c conda-forge rdkit openbabel mbuild numpy scipy networkx pyyaml
-pip install PyQt5 pytest
+pip install PyQt5 pytest moltemplate
 ```
 
 Why conda for RDKit/OpenBabel/mBuild: their pip wheels are missing or
@@ -100,7 +100,7 @@ brew install packmol lammps gromacs git
 conda create -n paaf python=3.11
 conda activate paaf
 conda install -c conda-forge rdkit openbabel mbuild numpy scipy networkx pyyaml
-pip install PyQt5 pytest
+pip install PyQt5 pytest moltemplate
 
 # DL_FIELD: register at https://www.ccp5.ac.uk/dl_field-registration,
 # unpack to ~/dl_f_4.13 (no spaces in the path), then:
@@ -120,7 +120,7 @@ sudo apt install -y git build-essential gfortran packmol gromacs lammps
 conda create -n paaf python=3.11
 conda activate paaf
 conda install -c conda-forge rdkit openbabel mbuild numpy scipy networkx pyyaml
-pip install PyQt5 pytest
+pip install PyQt5 pytest moltemplate
 
 # DL_FIELD: register at https://www.ccp5.ac.uk/dl_field-registration,
 # unpack to ~/dl_f_4.13 (no spaces in the path), then:
@@ -156,7 +156,7 @@ winget install Git.Git
 conda create -n paaf python=3.11
 conda activate paaf
 conda install -c conda-forge rdkit openbabel mbuild numpy scipy networkx pyyaml packmol lammps
-pip install PyQt5 pytest
+pip install PyQt5 pytest moltemplate
 
 git clone https://github.com/MuhammadUzairRiaz/PAAF.git
 cd PAAF
