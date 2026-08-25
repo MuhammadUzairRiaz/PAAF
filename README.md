@@ -163,7 +163,7 @@ cd PAAF
 python run_paaf.py
 ```
 
-### 1.3 Launch
+### 1.4 Launch
 
 ```bash
 cd PAAF
