@@ -35,3 +35,35 @@ def test_timeout_still_applies():
     with pytest.raises(TimeoutError):
         run_cancellable(["sleep", "30"], timeout_s=1.0)
     assert time.monotonic() - t0 < 5.0
+
+
+def test_export_cell_accepts_the_cancel_token_the_gui_passes():
+    """The GUI worker calls export_cell(..., cancel=token). A signature
+    mismatch here broke EVERY build with "unexpected keyword argument
+    'cancel'" — so the full chain of signatures is pinned."""
+    import inspect
+
+    from paaf.cell.cell_export import _run_dlfield, export_cell
+    from paaf.cell.soft_pushoff import soft_pushoff
+    from paaf.dlfield_runner import run_dlfield
+
+    for fn in (export_cell, _run_dlfield, soft_pushoff, run_dlfield):
+        assert "cancel" in inspect.signature(fn).parameters, fn.__name__
+
+
+def test_export_cell_with_cancel_token_builds_untyped(tmp_path):
+    """End-to-end: the exact GUI call shape, with a real token."""
+    pytest.importorskip("rdkit")
+    from paaf.cell.composition import Component, from_chain_counts
+    from paaf.cell.grow import grow_amorphous_cell
+    from paaf.cell.cell_export import export_cell
+
+    comp = from_chain_counts(
+        [Component(name="PE", repeat_unit="[*]CC[*]",
+                   degree_of_polymerisation=10, n_chains=2, ris_key="PE")],
+        0.85)
+    res = grow_amorphous_cell(comp.grow_specs(), comp.box(),
+                              temperature=413.0, seed=5)
+    exp = export_cell(res, comp.grow_specs(), tmp_path, name="pe",
+                      ff_key="", push_off=False, cancel=CancelToken())
+    assert exp.bead_xyz is not None

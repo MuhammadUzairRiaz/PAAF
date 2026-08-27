@@ -299,7 +299,7 @@ def _run_dlfield(structure: Path, work_dir: Path, ff_key: str,
                  dl_field_dir: Optional[Path],
                  emit: Callable[[str], None],
                  output_engine: str = "lammps",
-                 box_ang=None) -> Optional[Path]:
+                 box_ang=None, cancel=None) -> Optional[Path]:
     from ..dlfield_runner import run_dlfield
 
     dl_field_dir = _dlfield_root(dl_field_dir)
@@ -317,7 +317,7 @@ def _run_dlfield(structure: Path, work_dir: Path, ff_key: str,
                          work_dir=work_dir, dl_field_dir=dl_field_dir,
                          output_engine=output_engine,
                          box_ang=tuple(box_ang) if box_ang is not None
-                         else None)
+                         else None, cancel=cancel)
     # DLFieldResult's field is ``return_code`` — NOT subprocess's
     # ``returncode``. The old getattr(..., "returncode", 1) never found the
     # attribute, so its default of 1 declared every SUCCESSFUL run a failure
@@ -443,6 +443,7 @@ def export_cell(
     relax_settings: Optional[object] = None,
     output_formats: str = "lammps",   # "lammps" | "gromacs" | "both"
     progress: Optional[Callable[[str], None]] = None,
+    cancel=None,
 ) -> CellExport:
     """Write everything the grown cell can honestly support.
 
@@ -612,7 +613,8 @@ def export_cell(
                 data = _run_dlfield(src, folder / "_typing", ff_key,
                                     Path(dl_field_dir) if dl_field_dir
                                     else None,
-                                    emit, box_ang=result.box.bounding_box())
+                                    emit, box_ang=result.box.bounding_box(),
+                                    cancel=cancel)
             except Exception as exc:
                 from .packing import PackCancelled as _PC
                 if isinstance(exc, _PC):
@@ -668,7 +670,8 @@ def export_cell(
                                    Path(dl_field_dir) if dl_field_dir
                                    else None,
                                    emit, output_engine="gromacs",
-                                   box_ang=result.box.bounding_box())
+                                   box_ang=result.box.bounding_box(),
+                                   cancel=cancel)
             except Exception as exc:
                 from .packing import PackCancelled as _PC
                 if isinstance(exc, _PC):
