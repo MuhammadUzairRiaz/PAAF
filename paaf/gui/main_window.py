@@ -114,6 +114,7 @@ NAV_ITEMS = [
     ("Layering",       "Stack components into their own regions: sizes, axis, gap (independent)"),
     ("Blend",          "Multi-component polymer blend packing (independent)"),
     ("Amorphous cell", "Grow chains into a periodic cell: composition + density → simulation-ready files"),
+    ("CG builder",     "Kremer-Grest bead-spring cell: FENE + WCA, C_n-fitted stiffness (independent)"),
 ]
 
 # Pipeline step indices (used by Next/Back navigation, so 'Reactions' and
@@ -270,6 +271,12 @@ class MainWindow(QMainWindow):
         self.amorphous_tab.log.connect(self._append_log)
         self.pages.addWidget(self.amorphous_tab)                         # 9
 
+        from .cg_tab import CGTab
+        self.cg_tab = CGTab()
+        self.cg_tab.log.connect(self._append_log)
+        self._shrinkify(self.cg_tab)
+        self.pages.addWidget(self._scroll(self.cg_tab))                  # 10
+
         self.setCentralWidget(wrapper)
         # The reaction export must use the force field / output folder the
         # user chose, so hand it an explicit accessor rather than letting it
@@ -291,6 +298,11 @@ class MainWindow(QMainWindow):
                 self._reaction_export_settings)
         except Exception as exc:
             self._append_log(f"[warn] blend settings not wired: {exc}")
+        try:
+            self.cg_tab.set_settings_provider(
+                self._reaction_export_settings)
+        except Exception as exc:
+            self._append_log(f"[warn] cg settings not wired: {exc}")
         try:
             self.layering_tab.set_settings_provider(
                 self._reaction_export_settings)

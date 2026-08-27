@@ -17,6 +17,10 @@ simulation-ready LAMMPS or GROMACS system, end to end:
   merging their force fields safely (type offsets, refused conflicts).
 - **Layering:** like Blend, but each component is confined to its own
   sub-box — stacked films with per-layer sizes, gap, and pinned origins.
+- **CG builder:** grows the same chains and writes a runnable
+  Kremer-Grest bead-spring cell (FENE bonds, WCA beads, chain stiffness
+  fitted to the polymer's measured C_n) — reduced or real units, one or
+  several species. Needs only LAMMPS: no DL_FIELD, no packmol.
 - **Reaction scheme (inside Builder):** define reactions with atom-mapped
   SMILES (53 built-in worked examples), export typed reactant/product
   structures and learned reaction templates.
