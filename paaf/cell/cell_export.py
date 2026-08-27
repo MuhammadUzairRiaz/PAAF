@@ -547,8 +547,11 @@ def export_cell(
             soft_pushoff(bm.molecule, _dims, folder / "_pushoff",
                          lammps_exe=getattr(relax_settings, "lammps_exe", "")
                          if relax_settings else "",
-                         emit=emit)
+                         cancel=cancel, emit=emit)
         except Exception as _exc:                    # pragma: no cover
+            from .packing import PackCancelled as _PC
+            if isinstance(_exc, _PC):
+                raise                      # a cancel is not a "skip"
             emit(f"  soft push-off skipped ({_exc})")
 
     exp.atomistic_xyz = folder / "cell_atomistic.xyz"
@@ -611,6 +614,9 @@ def export_cell(
                                     else None,
                                     emit, box_ang=result.box.bounding_box())
             except Exception as exc:
+                from .packing import PackCancelled as _PC
+                if isinstance(exc, _PC):
+                    raise
                 exp.messages.append(f"DL_FIELD typing failed — {exc}")
         if data is not None:
             exp.typed_data = folder / "cell.data"
@@ -664,6 +670,9 @@ def export_cell(
                                    emit, output_engine="gromacs",
                                    box_ang=result.box.bounding_box())
             except Exception as exc:
+                from .packing import PackCancelled as _PC
+                if isinstance(exc, _PC):
+                    raise
                 exp.messages.append(
                     f"DL_FIELD GROMACS output not produced ({exc})"
                     + ("; the LAMMPS route is still available."

@@ -106,6 +106,38 @@ class CancelToken:
         self._event.clear()
 
 
+def run_cancellable(cmd, *, cwd=None, timeout_s=None, cancel=None,
+                    poll_s=0.5):
+    """subprocess.run, but killable: polls ``cancel`` (a CancelToken) and
+    kills the child the moment it is set, raising PackCancelled.
+
+    Cancel used to do nothing during the LAMMPS push-off and DL_FIELD
+    stages — subprocess.run() blocks, so the button "worked" only after
+    the external program finished on its own.
+    """
+    import subprocess as _sp
+    import time as _time
+
+    proc = _sp.Popen(cmd, cwd=cwd, stdout=_sp.PIPE, stderr=_sp.PIPE,
+                     text=True)
+    start = _time.monotonic()
+    while True:
+        try:
+            out, err = proc.communicate(timeout=poll_s)
+            return proc.returncode, out, err
+        except _sp.TimeoutExpired:
+            pass
+        if cancel is not None and cancel.is_cancelled():
+            proc.kill()
+            proc.communicate()
+            raise PackCancelled("cancelled while an external program ran")
+        if timeout_s is not None and _time.monotonic() - start > timeout_s:
+            proc.kill()
+            out, err = proc.communicate()
+            raise TimeoutError(
+                f"external program exceeded {timeout_s}s")
+
+
 class PackError(RuntimeError):
     """Base class for packing failures."""
 

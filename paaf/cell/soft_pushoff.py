@@ -218,6 +218,7 @@ def soft_pushoff(molecule: Molecule, dims, work_dir: Path,
                  *, lammps_exe: str = "",
                  steps: int = 4000,
                  timeout_s: int = 900,
+                 cancel=None,
                  emit: Optional[Callable[[str], None]] = None) -> bool:
     """Run the push-off and write the relaxed coordinates back in place.
 
@@ -236,16 +237,17 @@ def soft_pushoff(molecule: Molecule, dims, work_dir: Path,
     work_dir = Path(work_dir)
     _data, inp = write_pushoff_inputs(molecule, dims, work_dir, steps=steps)
     say(f"  soft push-off: {exe.name}, {steps} steps of pair_style soft …")
+    from .packing import run_cancellable
     try:
-        proc = subprocess.run([str(exe), "-in", inp.name],
-                              cwd=work_dir, capture_output=True, text=True,
-                              timeout=timeout_s)
-    except subprocess.TimeoutExpired:
+        rc, out, err = run_cancellable([str(exe), "-in", inp.name],
+                                       cwd=work_dir, timeout_s=timeout_s,
+                                       cancel=cancel)
+    except TimeoutError:
         say(f"  soft push-off timed out after {timeout_s}s; coordinates "
             f"unchanged")
         return False
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-4:]
+    if rc != 0:
+        tail = (err or out or "").strip().splitlines()[-4:]
         say("  soft push-off failed:\n    " + "\n    ".join(tail))
         return False
 

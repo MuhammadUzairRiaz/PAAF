@@ -211,6 +211,7 @@ def run_dlfield(
     output_engine: str = "lammps",
     box_ang: Optional[tuple[float, float, float]] = None,
     control_name: str = "polymer.control",
+    cancel=None,
 ) -> DLFieldResult:
     """Run ``dl_field`` on `structure_path` and collect the outputs.
 
@@ -276,7 +277,16 @@ def run_dlfield(
 
     cmd = [str(exe), control.name]
     log.info("Running dl_field: %s (cwd=%s)", " ".join(cmd), work_dir)
-    proc = subprocess.run(cmd, cwd=str(work_dir), capture_output=True, text=True)
+    if cancel is not None:
+        from .cell.packing import run_cancellable
+        rc, _out, _err = run_cancellable(cmd, cwd=str(work_dir),
+                                         cancel=cancel)
+        class _P:  # duck-typed stand-in for CompletedProcess below
+            returncode, stdout, stderr = rc, _out, _err
+        proc = _P()
+    else:
+        proc = subprocess.run(cmd, cwd=str(work_dir), capture_output=True,
+                              text=True)
     log_text = (proc.stdout or "") + "\n" + (proc.stderr or "")
 
     # Save the full log next to polymer.control so users can inspect it after

@@ -167,6 +167,15 @@ class _BuildWorker(QObject):
                         lammps_exe=o["lammps_exe"],
                         gmx_exe=o.get("gmx_exe", ""),
                         mpi_ranks=o["mpi_ranks"])
+                def _emit_checked(msg: str) -> None:
+                    # A progress tick is also a cancellation point: raising
+                    # here aborts the export at the next stage boundary,
+                    # and the external LAMMPS/dl_field runs are killed
+                    # directly via the same token.
+                    if self._cancel.is_cancelled():
+                        raise PackCancelled("cancelled")
+                    self.progress.emit(msg)
+
                 export = export_cell(
                     result, specs, o["out_dir"], name=o["name"],
                     ff_key=o["ff_key"], dl_field_dir=o["dl_lib"] or None,
@@ -174,7 +183,7 @@ class _BuildWorker(QObject):
                     run_typing=o["run_typing"], push_off=o["push_off"],
                     relax=bool(o.get("relax")), relax_settings=rs,
                     output_formats=o.get("output_formats", "lammps"),
-                    progress=self.progress.emit)
+                    progress=_emit_checked, cancel=self._cancel)
             self.finished.emit((result, export))
         except PackCancelled:
             # A deliberate cancel is not a failure and must not raise an
@@ -1177,6 +1186,14 @@ class AmorphousTab(QWidget):
         h.addWidget(self.blocker)
         h.addStretch(1)
 
+        self.stage_lb = caption("")
+        self.stage_lb.setStyleSheet(
+            f"color: {T.PRIMARY}; font-weight: 700;"
+            f" font-size: {T.FS_CAPTION}px; background: transparent;"
+            f" border: none;")
+        self.stage_lb.hide()
+        h.addWidget(self.stage_lb)
+
         self.bar_progress = QProgressBar()
         self.bar_progress.setFixedWidth(180)
         self.bar_progress.setFixedHeight(T.H_CONTROL - 8)
@@ -1580,7 +1597,7 @@ class AmorphousTab(QWidget):
         self._worker = _BuildWorker(self._composition, options)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self._rlog)
+        self._worker.progress.connect(self._on_build_progress)
         self._worker.fraction.connect(
             lambda f: self.bar_progress.setValue(int(f * 100)))
         self._worker.finished.connect(self._on_built)
@@ -1598,18 +1615,48 @@ class AmorphousTab(QWidget):
         self._thread.finished.connect(self._on_thread_finished)
         self._thread.start()
 
+    #: substring -> stage shown while building (checked in order).
+    _STAGES = (
+        ("dl_field",       "4/5 · Force-field typing (DL_FIELD)"),
+        ("push-off",       "3/5 · Overlap push-off (LAMMPS)"),
+        ("back-mapping",   "2/5 · Back-mapping to atoms"),
+        ("unthread",       "2/5 · Back-mapping to atoms"),
+        ("side-group",     "2/5 · Back-mapping to atoms"),
+        ("relaxing",       "5/5 · Relaxation"),
+        ("wrote cell",     "5/5 · Writing outputs"),
+        ("exporting",      "5/5 · Writing outputs"),
+        ("bead cell",      "5/5 · Writing outputs"),
+        ("chain ",         "1/5 · Growing chains"),
+        ("template",       "1/5 · Growing chains"),
+        ("regrow",         "1/5 · Growing chains"),
+    )
+
+    def _on_build_progress(self, msg: str) -> None:
+        """Log the message and reflect the pipeline stage next to the bar."""
+        low = msg.lower()
+        for key, stage in self._STAGES:
+            if key in low:
+                if self.stage_lb.text() != stage:
+                    self.stage_lb.setText(stage)
+                break
+        self._rlog(msg)
+
     def _cancel_build(self) -> None:
         if self._worker is not None:
             self._worker.cancel()
-            self._rlog("cancelling after the current chain …")
+            self.stage_lb.setText("Cancelling …")
+            self._rlog("cancelling — stopping the current stage "
+                       "(external programs are killed immediately)")
 
     def _set_busy(self, busy: bool) -> None:
         self.b_build.setEnabled(not busy)
         self.b_solve.setEnabled(not busy)
         self.b_cancel.setVisible(busy)
         self.bar_progress.setVisible(busy)
+        self.stage_lb.setVisible(busy)
         if busy:
             self.bar_progress.setValue(0)
+            self.stage_lb.setText("Starting …")
 
     def _on_thread_finished(self) -> None:
         """Drop our references only once Qt has finished with the objects."""
