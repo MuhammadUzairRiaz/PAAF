@@ -121,6 +121,10 @@ class _BuildWorker(QObject):
                 try:
                     import numpy as _np
                     from ..cell.backmap import backmap_cell as _bm
+                    self.progress.emit(
+                        "checking the grown cell for ring threading "
+                        "(probe back-map — silent but busy; minutes on "
+                        "large cells) …")
                     probe = _bm(grown, specs, tacticity=o["tacticity"],
                                 push_off=False)
                     n_speared = getattr(probe, "n_speared", None)
@@ -1626,6 +1630,7 @@ class AmorphousTab(QWidget):
         ("wrote cell",     "5/5 · Writing outputs"),
         ("exporting",      "5/5 · Writing outputs"),
         ("bead cell",      "5/5 · Writing outputs"),
+        ("probe back-map", "1/5 · Verifying growth (threading probe)"),
         ("chain ",         "1/5 · Growing chains"),
         ("template",       "1/5 · Growing chains"),
         ("regrow",         "1/5 · Growing chains"),
