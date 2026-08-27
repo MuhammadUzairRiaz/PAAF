@@ -28,6 +28,10 @@ class LibraryPicker(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Choose a polymer from the library")
         self.resize(900, 560)
+        # Windows/WSLg renders the dialog transparent without an
+        # explicit background; macOS painted a native one.
+        self.setStyleSheet(
+            f"QDialog {{ background: {T.BG_PAGE}; }}")
         self._records = []
         self._filtered = []
 
@@ -92,6 +96,7 @@ class LibraryPicker(QDialog):
                 r for r in self._records
                 if q in (r.name or "").lower()
                 or q in (r.pid or "").lower()
+                or q in (r.description or "").lower()
                 or q in (r.smiles or "").lower()
             ]
         else:
@@ -104,7 +109,12 @@ class LibraryPicker(QDialog):
             r = self.table.rowCount()
             self.table.insertRow(r)
             tg = "" if rec.tg_k is None else f"{rec.tg_k:.0f}"
-            for c, val in enumerate([rec.pid or "", rec.name or "",
+            # Database rows carry the PID in `name` and the human
+            # name in `description` — show the human one.
+            shown = rec.name or ""
+            if rec.pid and shown == rec.pid and (rec.description or "").strip():
+                shown = rec.description.strip()
+            for c, val in enumerate([rec.pid or "", shown,
                                      rec.smiles or "", tg]):
                 it = QTableWidgetItem(str(val))
                 if c == 2:
