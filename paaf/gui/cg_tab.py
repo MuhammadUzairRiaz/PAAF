@@ -63,6 +63,7 @@ class _CGWorker(QObject):
             res = grow_amorphous_cell(
                 comp.grow_specs(), comp.box(),
                 temperature=o["temperature"], seed=o["seed"],
+                tolerance=o["tolerance"],
                 cancel=self._cancel,
                 progress=self.progress.emit)
             cn = float(getattr(res, "mean_c_n", 0.0) or 0.0)
@@ -165,6 +166,16 @@ class CGTab(QWidget):
         self.seed = QSpinBox(); self.seed.setRange(1, 2_000_000_000)
         self.seed.setValue(12345)
         f.addRow("Seed", self.seed)
+        self.tolerance = QDoubleSpinBox()
+        self.tolerance.setRange(0.0, 5.0); self.tolerance.setValue(0.9)
+        self.tolerance.setSuffix(" Å")
+        self.tolerance.setToolTip(wrap_tooltip(
+            "Minimum distance growth keeps between non-bonded beads. CG "
+            "can afford a LOW value (the LAMMPS soft push-off in "
+            "cell_cg.in dissolves residual overlaps safely), so long "
+            "chains at full melt density still build. The atomistic "
+            "tools need ~1.7 Å; beads do not."))
+        f.addRow("Overlap tolerance", self.tolerance)
         row2.addWidget(card_g, 1)
 
         card_m = Card("Kremer-Grest model")
@@ -392,6 +403,7 @@ class CGTab(QWidget):
             "build_fraction": float(self.build_at.value()) / 100.0,
             "temperature": float(self.temperature.value()),
             "seed": int(self.seed.value()),
+            "tolerance": float(self.tolerance.value()),
             "units": self.units.currentData(),
             "mapping": self.mapping.currentData(),
             "angle_mode": self.angle_mode.currentData(),
