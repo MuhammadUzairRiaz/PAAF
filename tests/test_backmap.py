@@ -341,7 +341,7 @@ def test_export_gromacs_format_delivers_gro_top_and_itps(tmp_path,
     engines_asked = []
 
     def fake_run(structure, work_dir, ff_key, dl_dir, emit,
-                 output_engine="lammps", box_ang=None):
+                 output_engine="lammps", box_ang=None, cancel=None):
         engines_asked.append(output_engine)
         assert box_ang is not None, "the box must be passed for BOTH engines"
         out = Path(work_dir) / "dlf_output1"
@@ -379,7 +379,7 @@ def test_export_gromacs_only_needs_no_lammps_run(tmp_path, monkeypatch):
     engines_asked = []
 
     def fake_run(structure, work_dir, ff_key, dl_dir, emit,
-                 output_engine="lammps", box_ang=None):
+                 output_engine="lammps", box_ang=None, cancel=None):
         engines_asked.append(output_engine)
         out = Path(work_dir) / "dlf_output1"
         out.mkdir(parents=True, exist_ok=True)
