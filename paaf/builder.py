@@ -85,7 +85,7 @@ _CURATED: Dict[str, MonomerRecipe] = {
     "PC":    MonomerRecipe("PC",  "[*]OC(=O)Oc1ccc(cc1)C(C)(C)c1ccc(cc1)[*]",
                            "OC(=O)Oc1ccc(cc1)C(C)(C)c1ccc(cc1)O",
                            "Polycarbonate (bisphenol-A)", tags=["curated"]),
-    "PDMS":  MonomerRecipe("PDMS","[*][Si]([*])(C)C",    "[SiH2](C)C",   "Polydimethylsiloxane",
+    "PDMS":  MonomerRecipe("PDMS","[*][Si](C)(C)O[*]",    "[SiH2](C)C",   "Polydimethylsiloxane",
                            tags=["curated"]),
     "PEO":   MonomerRecipe("PEO", "[*]CCO[*]",           "CCOC",         "Poly(ethylene oxide)",
                            tags=["curated"]),

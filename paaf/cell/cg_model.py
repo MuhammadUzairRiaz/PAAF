@@ -254,7 +254,12 @@ def build_cg_cell(
           f"0.0 {length(dims[2]):.6f} zlo zhi",
           "", "Masses", ""]
     for t in range(n_types):
-        L.append(f"{t + 1} {masses[t]:.4f}  # {labels[t]}")
+        # Always state the real mass: in reduced units the number is
+        # scaled (reference bead = 1) and users rightly ask where the
+        # chemistry went.
+        L.append(f"{t + 1} {masses[t]:.4f}  # {labels[t]} "
+                 f"({mass_of_type[t]:.2f} amu/bead, "
+                 f"{'1 repeat unit' if st.mapping == 'monomer' else '1 skeletal atom'}/bead)")
     L += ["", "Atoms # molecular", ""]
     for i in range(n_beads):
         p = pos[i]

@@ -146,3 +146,55 @@ def test_beads_are_inside_the_box(tmp_path):
             rows.append([float(x) for x in p[3:6]])
     xyz = np.array(rows)
     assert (xyz >= 0).all()
+
+
+def test_repeat_unit_mass_is_correct_for_every_library_polymer():
+    """The CG bead mass comes straight from repeat_unit_mass; a silent
+    error there mis-scales every derived quantity. Each library SMILES is
+    cross-checked against RDKit's molecular weight of the H-capped unit
+    minus the two capping hydrogens. (PDMS was 2 H light: a bracketed
+    [Si] at the attachment point dodged implicit-H capping.)"""
+    import logging
+    logging.disable(logging.CRITICAL)
+    from rdkit import Chem
+    from rdkit.Chem.Descriptors import MolWt
+
+    from paaf.builder import list_library
+    from paaf.cell.grow import repeat_unit_mass
+
+    checked, failures = 0, []
+    for rec in list_library("all"):
+        smi = rec.smiles
+        if not smi or "[*]" not in smi:
+            continue
+        ref_mol = Chem.MolFromSmiles(smi.replace("[*]", "[H]"))
+        if ref_mol is None:
+            continue
+        n_attach = smi.count("[*]")
+        ref = MolWt(ref_mol) - n_attach * 1.008
+        got = repeat_unit_mass(smi)
+        if abs(got - ref) > 0.5:
+            failures.append(f"{rec.name}: {got:.2f} vs {ref:.2f}")
+        checked += 1
+    print(f"\n  {checked} library polymers mass-checked")
+    assert checked > 100
+    assert not failures, failures
+
+
+def test_nylon_bead_masses_are_real(tmp_path):
+    """Nylon-6: repeat unit C6H11NO = 113.16 amu. Per-repeat-unit mapping
+    must carry that mass; reduced units show 1 (by definition) but the
+    comment must state the real amu."""
+    res, specs = _cell(smiles="[*]CCCCCC(=O)N[*]", dp=6, chains=2,
+                       density=0.9, name="Nylon6")
+    data, _ = build_cg_cell(res, specs, tmp_path, settings=CGSettings(
+        units="lj", mapping="monomer", angle_mode="off"))
+    text = data.read_text()
+    assert "1 1.0000  # Nylon6 (113." in text, \
+        [l for l in text.splitlines() if "Nylon6" in l]
+    # and in real units the number itself is the amu
+    data2, _ = build_cg_cell(res, specs, tmp_path / "r",
+                             settings=CGSettings(units="real",
+                                                 mapping="monomer",
+                                                 angle_mode="off"))
+    assert "1 113." in data2.read_text()

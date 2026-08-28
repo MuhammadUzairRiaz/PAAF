@@ -148,7 +148,13 @@ def molecular_formula(smiles: str) -> Dict[str, int]:
     n_attach = 0
     if is_polymer_smiles(smi):
         n_attach = count_attachment_points(smi)
-        smi = expand_if_polymer(smi, 1)            # one repeat unit
+        # Cap the attachment points with EXPLICIT hydrogens rather than
+        # stripping the [*] markers. Stripping leaves any bracketed
+        # neighbour ([Si], [N+], ...) still bracketed, so RDKit adds no
+        # implicit hydrogens to it — and the attachment correction below
+        # then subtracts H that were never counted. PDMS-type units came
+        # out 2 H light (a 3.6% mass error) exactly this way.
+        smi = smi.replace("[*]", "[H]")
     mol = Chem.MolFromSmiles(smi)
     if mol is None:
         raise ValueError(f"RDKit could not parse SMILES {smiles!r}")
