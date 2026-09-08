@@ -161,6 +161,29 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                            tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm)
         structure.write(chain, out_dir / f"{cfg.project_name}_opt.xyz")
 
+    # 3b. Geometry sanity: mbuild's straight-line join overlaps bulky side
+    # groups and a local minimiser cannot untangle that. dl_field infers
+    # bonds from distances, so a clashed chain reads as the wrong molecule
+    # ("Fail to decide type of unsaturated C atom"). Rebuild coordinates
+    # from the bond topology when needed — general for any polymer.
+    from .geometry_repair import ensure_clean_geometry, is_clean
+    _geom_ok = True
+    if not is_clean(chain):
+        _geom_ok = ensure_clean_geometry(chain, _p, seed=int(cfg.chain.seed or 7))
+        if _geom_ok and cfg.optimizer.enabled:
+            # Push-off geometry is approximate (covalent-radius bond lengths,
+            # ideal angles): polish it with the real force field, then make
+            # sure the minimiser did not fold it back into a clash.
+            _p("Re-optimising the repaired chain")
+            optimizer.optimize(chain, ff=cfg.optimizer.ff, steps=cfg.optimizer.steps,
+                               tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm)
+            if not is_clean(chain):
+                _geom_ok = ensure_clean_geometry(chain, _p, seed=int(cfg.chain.seed or 7) + 1)
+    if not _geom_ok:
+        _p("WARNING: chain geometry still has overlaps; force-field typing "
+           "from coordinates may fail.")
+    structure.write(chain, out_dir / f"{cfg.project_name}_opt.xyz")
+
     # 4. Force field: convert if requested, then type atoms
     ff = get_ff(cfg.force_field.key)
     _p(f"Force field: {ff.display_name}")
@@ -692,11 +715,23 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                         tail = "\n".join(dl_log_path.read_text(errors="replace").splitlines()[-40:])
                     if not tail:
                         tail = "\n".join(dlfield_result.log.splitlines()[-40:])
+                    hint = ""
+                    if "unsaturated" in tail or "Fail to decide type" in tail:
+                        from .geometry_repair import find_clashes as _fc
+                        _cl, _bb = _fc(chain)
+                        hint = ("\n'Fail to decide type of unsaturated C atom' means dl_field\n"
+                                "perceived a bond count from the coordinates that does not\n"
+                                "match the element (it infers bonds from distances). "
+                                + (f"The chain\nstill has {len(_cl)} overlapping pair(s) and "
+                                   f"{len(_bb)} distorted bond(s).\n"
+                                   if (_cl or _bb) else
+                                   "PAAF's own\ngeometry check found no clashes, so the atom is "
+                                   "probably one\nthis force field has no type for.\n"))
                     raise RuntimeError(
                         "dl_field ran (exit 0) but produced NO lammps.data / FIELD.\n\n"
                         "This usually means DL_FIELD couldn't type one or more atoms\n"
                         "against its force-field library (e.g. bad element labels in\n"
-                        "the xyz, or a group DL_FIELD doesn't recognise).\n\n"
+                        "the xyz, or a group DL_FIELD doesn't recognise)." + hint + "\n\n"
                         "Full log: " + str(dl_log_path) + "\n"
                         "Working dir: " + str(out_dir) + "\n\n"
                         "Last lines of dl_field output:\n\n" + tail
