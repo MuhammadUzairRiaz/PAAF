@@ -751,10 +751,16 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
             and _style_choice in ("non_hybrid", "nonhybrid", "both")):
         from .lammps_hybrid import convert_to_nonhybrid, is_hybrid_input
         _in = out_dir / "lammps.in"
-        _datas = [out_dir / n for n in ("lammps.data", "lammps1.data", "packed_box.data")]
+        # Only the file lammps.in will read: the packed N-chain box when
+        # there is one, else the single chain (lammps.data == lammps1.data).
+        _packed = out_dir / "packed_box.data"
+        if _packed.exists():
+            _datas = [_packed]
+        else:
+            _datas = [out_dir / "lammps.data"] if (out_dir / "lammps.data").exists() \
+                     else [out_dir / "lammps1.data"]
         if _in.exists() and is_hybrid_input(_in):
-            _packed = out_dir / "packed_box.data"
-            _rd = "packed_box.data" if _packed.exists() else None
+            _rd = "packed_box.data" if _packed.exists() else _datas[0].name
             _nh_in, _nh_data = convert_to_nonhybrid(
                 _in, _datas, out_dir / "non_hybrid", read_data=_rd)
             nonhybrid_files = [_nh_in] + list(_nh_data)
