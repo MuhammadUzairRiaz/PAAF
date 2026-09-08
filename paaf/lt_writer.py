@@ -1,6 +1,7 @@
 """Emit Moltemplate .lt files for monomers, polymer chains, and simulation boxes."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
@@ -155,10 +156,31 @@ def write_system_lt(
     lines: List[str] = []
     lines.append(f'import "{Path(chain_lt).name}"')
     lines.append("")
-    lines.append(f"chains = new {chain_stem}[{n_chains}].move(20.0, 0, 0)")
+    lx, ly, lz = box
+    if n_chains <= 1:
+        lines.append(f"chains = new {chain_stem}")
+    else:
+        # Spread the copies on a 3-D grid that fills the box. A 1-D
+        # `[N].move(20,0,0)` array put every chain on one line sticking
+        # out of the box; the pipeline packs properly afterwards (packmol),
+        # this grid is only the fallback that keeps everything inside.
+        nx = max(1, int(math.ceil(n_chains ** (1.0 / 3.0))))
+        ny = nx
+        nz = max(1, int(math.ceil(n_chains / float(nx * ny))))
+        dx, dy, dz = lx / nx, ly / ny, lz / nz
+        lines.append(f"# {n_chains} copies on a {nx}x{ny}x{nz} grid inside the box "
+                     f"(fallback layout; see packed_box.data for the packmol result)")
+        k = 0
+        for iz in range(nz):
+            for iy in range(ny):
+                for ix in range(nx):
+                    if k >= n_chains:
+                        break
+                    lines.append(f"chain{k + 1} = new {chain_stem}.move("
+                                 f"{ix * dx:.3f}, {iy * dy:.3f}, {iz * dz:.3f})")
+                    k += 1
     lines.append("")
     lines.append("write_once('Data Boundary') {")
-    lx, ly, lz = box
     lines.append(f"    0.0 {lx:.4f} xlo xhi")
     lines.append(f"    0.0 {ly:.4f} ylo yhi")
     lines.append(f"    0.0 {lz:.4f} zlo zhi")
@@ -221,12 +243,20 @@ def write_lammps_input(
     thermo_every: int = 1000,
     dump_every: int = 0,
     seed: int = 4928459,
+    init_file: str | None = None,
+    charges_file: str | None = None,
 ) -> Path:
     """Write a LAMMPS input script.
 
     Two modes:
       * Single-stage (default): minimize -> velocity init -> chosen `ensemble`.
       * Multi-stage (``multistage=True``): minimize -> NVT eq -> NPT prod.
+
+    ``init_file`` (moltemplate's ``system.in.init``: pair/bond/angle styles)
+    is included *before* ``read_data`` — LAMMPS needs the styles to exist
+    before it reads coefficients. ``charges_file`` (``system.in.charges``,
+    ``set type … charge``) is included after, because OPLS-AA via
+    moltemplate leaves the charge column in the data file at zero.
     """
     out_dir = Path(out_dir)
     fname = out_dir / name
@@ -240,9 +270,13 @@ def write_lammps_input(
     lines.append("units           real")
     lines.append("atom_style      full")
     lines.append("boundary        p p p")
+    if init_file:
+        lines.append(f"include         {init_file}")
     lines.append("")
     lines.append(f"read_data       {data_file}")
     lines.append(f"include         {settings_file}")
+    if charges_file:
+        lines.append(f"include         {charges_file}")
     lines.append("")
     lines.append("neighbor        2.0 bin")
     lines.append("neigh_modify    every 1 delay 0 check yes one 10000 page 1000000")

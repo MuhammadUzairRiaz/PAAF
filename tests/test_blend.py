@@ -94,7 +94,7 @@ def test_blend_replicator_merges_type_offsets_and_topology(tmp_path, monkeypatch
     # Fake packmol: write a PDB with 5 * 4 + 3 * 3 = 29 atoms whose
     # coordinates are simple grid translations of the input xyz.
     def _fake_pack(pdb_files, counts, out_pdb, box_edges, tolerance, seed,
-                   packmol_path=None):
+                   packmol_path=None, regions=None):
         # Just concatenate input atoms shifted by index — enough for parsing.
         lines = ["REMARK fake packmol output"]
         serial = 1

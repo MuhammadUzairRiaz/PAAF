@@ -336,14 +336,22 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
     # DL_FIELD-based FFs don't need any .lt files (they use dl_field directly).
     chain_lt: Optional[Path] = None
     system_lt: Optional[Path] = None
+    # moltemplate is run on ONE chain; the N-chain box is then packed with
+    # packmol from that single-chain data file (same replicator as the
+    # DL_FIELD route). `new X[N].move(...)` would only line the copies up.
+    _n_chains_mt = int(cfg.box.n_chains)
+    _pack_after_mt = (ff.kind != "dlfield" and _n_chains_mt > 1)
     if ff.kind != "dlfield":
         _p("Writing Moltemplate files")
         chain_lt = lt_writer.write_chain_lt(chain, out_dir, ff, name=cfg.project_name)
         system_lt = lt_writer.write_system_lt(
-            out_dir, chain_lt, n_chains=cfg.box.n_chains,
+            out_dir, chain_lt, n_chains=1,
             box=list(box_shape.bounding_box()),
             name="system", ff=ff,
         )
+        if _pack_after_mt:
+            _p(f"system.lt holds ONE chain; {_n_chains_mt} copies will be "
+               f"packed into the box with packmol after moltemplate runs.")
     else:
         _p("DL_FIELD path — skipping Moltemplate .lt scaffolding "
            "(dl_field will build the topology directly).")
@@ -364,8 +372,10 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
     if want_lammps and cfg.run_moltemplate and not _use_dl_pre:
         input_file = lt_writer.write_lammps_input(
             out_dir,
-            data_file="system.data",
+            data_file=("packed_box.data" if _pack_after_mt else "system.data"),
             settings_file="system.in.settings",
+            init_file="system.in.init",
+            charges_file="system.in.charges",
             ensemble=cfg.lammps.ensemble,
             temperature=cfg.lammps.temperature,
             pressure=cfg.lammps.pressure,
@@ -696,6 +706,22 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
         if want_lammps:
             if find_moltemplate():
                 data_file = run_moltemplate(system_lt, work_dir=out_dir)
+                if _pack_after_mt and data_file and Path(data_file).exists():
+                    _p(f"[replicator] Packing {_n_chains_mt} chains into box "
+                       f"({box_shape.a:.1f} × {box_shape.b:.1f} × "
+                       f"{box_shape.c:.1f} Å) via packmol (falls back to grid)")
+                    from .lammps_replicator import replicate_single_chain
+                    packed_data = replicate_single_chain(
+                        Path(data_file), _n_chains_mt,
+                        (box_shape.a, box_shape.b, box_shape.c),
+                        out_dir / "packed_box.data",
+                        packmol_path=getattr(cfg.box, "packmol_path", "") or None,
+                        seed=int(getattr(cfg.box, "packmol_seed", -1)),
+                        tolerance=float(getattr(cfg.box, "packmol_tolerance", 2.0)),
+                    )
+                    _p(f"[replicator] Wrote {packed_data} "
+                       f"(run.in reads this file; system.data is the single chain)")
+                    data_file = packed_data
             else:
                 log.warning(
                     "moltemplate.sh not found; skipping. LAMMPS data will not be generated. "
