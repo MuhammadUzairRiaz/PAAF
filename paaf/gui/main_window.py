@@ -31,7 +31,7 @@ from PyQt5.QtWidgets import (
     QAction, QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
     QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit,
     QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit,
-    QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
+    QProgressBar, QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter,
     QStackedWidget, QStatusBar, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
@@ -47,6 +47,7 @@ from ..config import (
 from ..ff_registry import list_ffs
 from ..logging_utils import QtLogHandler, get_logger
 from ..pipeline import run_pipeline
+from ..run_progress import parse_stage
 from .builder_tab import BuilderTab
 from .blend_tab import BlendTab
 # System builder is parked for now:
@@ -1116,6 +1117,25 @@ class MainWindow(QMainWindow):
         self.topology_builder.addItem("Auto (based on chosen force field)", userData="auto")
         self.topology_builder.addItem("moltemplate.sh", userData="moltemplate")
         self.topology_builder.addItem("dl_field", userData="dl_field")
+        # DL_FIELD writes hybrid styles ("bond_style hybrid harmonic").
+        # Offer the plain form too — it is what most users hand-edit and
+        # what other tools expect.
+        self.lammps_styles = QComboBox()
+        self.lammps_styles.addItem(
+            "Hybrid — as written by dl_field (bond_style hybrid harmonic)",
+            userData="hybrid")
+        self.lammps_styles.addItem(
+            "Non-hybrid — plain styles (bond_style harmonic), in non_hybrid/",
+            userData="non_hybrid")
+        self.lammps_styles.addItem("Both — keep dl_field files and write non_hybrid/",
+                                   userData="both")
+        self.lammps_styles.setToolTip(
+            "Applies to LAMMPS output from the dl_field route only.\n"
+            "Hybrid: every *_style is 'hybrid <one sub-style>' and each\n"
+            "coefficient line repeats the sub-style name — valid, but awkward\n"
+            "to merge or edit.\nNon-hybrid: the same numbers with plain styles.\n"
+            "The converted lammps.in + lammps.data + packed_box.data are\n"
+            "written to <output>/non_hybrid/; the originals are kept.")
         self.gromacs_itp = QLineEdit()
         self.gromacs_itp.setPlaceholderText("optional path to a GROMACS FF .itp (e.g. oplsaa.ff/forcefield.itp)")
         self.run_moltemplate = QCheckBox(
@@ -1140,6 +1160,7 @@ class MainWindow(QMainWindow):
         pf.addRow("", self.project_path_hint)
         pf.addRow("MD engine output", self.engine_combo)
         pf.addRow("Topology builder", self.topology_builder)
+        pf.addRow("LAMMPS styles (dl_field)", self.lammps_styles)
         pf.addRow("GROMACS #include .itp", self.gromacs_itp)
         pf.addRow("", self.run_moltemplate)
         v.addWidget(gb_proj)
@@ -1185,7 +1206,9 @@ class MainWindow(QMainWindow):
             "GROMACS <code>system.gro</code> + <code>system.top</code> + "
             "<code>*.mdp</code>, via <code>dl_field</code>. "
             "<b>Always auto-runs</b> — dl_field is invoked as soon as you "
-            "click Generate files, regardless of the Auto-run checkbox."
+            "click Generate files, regardless of the Auto-run checkbox. "
+            "dl_field writes <i>hybrid</i> styles; choose <b>Non-hybrid</b> "
+            "above to also get plain-style copies in <code>non_hybrid/</code>."
             "<br><br>"
             "No ensemble / thermostat / damping is written by this tool — "
             "set those in your LAMMPS input or MDP when you run the sim."
@@ -1193,6 +1216,22 @@ class MainWindow(QMainWindow):
         _out_lbl.setWordWrap(True)
         vl.addWidget(_out_lbl)
         v.addWidget(gb_out)
+
+        # Run status: stage label + bar, driven by "[stage k/N] …" lines.
+        self.run_status = QLabel("Ready — click Generate files.")
+        self.run_status.setProperty("role", "hint")
+        self.run_status.setWordWrap(True)
+        self.run_bar = QProgressBar()
+        self.run_bar.setRange(0, 100)
+        self.run_bar.setValue(0)
+        self.run_bar.setTextVisible(True)
+        self.run_bar.setFormat("%p%")
+        self.run_bar.setFixedHeight(18)
+        st = QHBoxLayout()
+        st.addWidget(self.run_bar, 1)
+        st.addWidget(self.run_status, 3)
+        v.addLayout(st)
+        self._stage_ready = True
 
         row = QHBoxLayout()
         self.btn_run = QPushButton("▶  Generate files")
@@ -1653,6 +1692,7 @@ class MainWindow(QMainWindow):
             engine=self.engine_combo.currentText(),
             topology_builder=(self.topology_builder.currentData() or "auto"),
             gromacs_include_itp=self.gromacs_itp.text().strip() or None,
+            lammps_styles=(self.lammps_styles.currentData() or "hybrid"),
         )
 
     def _apply_config(self, cfg: Config) -> None:
@@ -1732,6 +1772,11 @@ class MainWindow(QMainWindow):
                 self.topology_builder.setCurrentIndex(i)
                 break
         self.gromacs_itp.setText(cfg.gromacs_include_itp or "")
+        _ls = getattr(cfg, "lammps_styles", "hybrid")
+        for i in range(self.lammps_styles.count()):
+            if self.lammps_styles.itemData(i) == _ls:
+                self.lammps_styles.setCurrentIndex(i)
+                break
         self._sync_project_label()
 
     # ================================================== config IO / run
@@ -1769,6 +1814,10 @@ class MainWindow(QMainWindow):
             )
             return
         self.btn_run.setEnabled(False)
+        self.btn_run.setText("⏳  Running…")
+        self.run_bar.setValue(0)
+        self.run_bar.setStyleSheet("")
+        self.run_status.setText("Starting…")
         self._thread = QThread(self)
         self._worker = Worker(cfg)
         self._worker.moveToThread(self._thread)
@@ -1778,11 +1827,29 @@ class MainWindow(QMainWindow):
         self._worker.failed.connect(self._on_failed)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
-        self._thread.finished.connect(lambda: self.btn_run.setEnabled(True))
+        self._thread.finished.connect(self._on_thread_done)
         self._thread.start()
+
+    def _on_thread_done(self) -> None:
+        self.btn_run.setEnabled(True)
+        self.btn_run.setText("▶  Generate files")
+
+    def _on_stage(self, msg: str) -> bool:
+        """Update the Export page bar from a '[stage k/N] label' line."""
+        parsed = parse_stage(msg)
+        if parsed is None:
+            return False
+        pct, _n, text, _done = parsed
+        self.run_bar.setValue(pct)
+        self.run_status.setText(text)
+        return True
 
     @pyqtSlot(dict)
     def _on_finished(self, result: dict) -> None:
+        self.run_bar.setValue(100)
+        if not self.run_status.text().startswith("✓"):
+            self.run_status.setText("✓ Completed — files in "
+                                    + str(result.get("output_dir", "")))
         self._append_log("=" * 60)
         self._append_log("PIPELINE FINISHED")
         for k, v in result.items():
@@ -1793,6 +1860,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def _on_failed(self, err: str) -> None:
+        self.run_status.setText("✗ Failed — " + err.strip().splitlines()[0][:160]
+                                + "  (see log)")
+        self.run_bar.setStyleSheet("QProgressBar::chunk{background:#DC2626;}")
         self._append_log("PIPELINE FAILED")
         self._append_log(err)
         QMessageBox.critical(self, "Pipeline failed", err[:2000])
@@ -1804,6 +1874,8 @@ class MainWindow(QMainWindow):
         logging.getLogger("paaf").addHandler(handler)
 
     def _append_log(self, msg: str) -> None:
+        if getattr(self, "_stage_ready", False):
+            self._on_stage(msg)
         self.console.appendPlainText(msg)
         self.console.verticalScrollBar().setValue(self.console.verticalScrollBar().maximum())
 

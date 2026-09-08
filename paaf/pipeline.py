@@ -85,11 +85,18 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
         if progress:
             progress(msg)
 
+    # Stage markers. The GUI parses "[stage k/N] label" to drive its
+    # progress bar; everything else is plain log text.
+    N_STAGES = 7
+
+    def _stage(k: int, label: str) -> None:
+        _p(f"[stage {k}/{N_STAGES}] {label}")
+
     out_dir = Path(cfg.output_dir) / cfg.project_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Load and optimize monomers
-    _p("Loading monomers...")
+    _stage(1, "Loading monomers")
     monomers = []
     _DUMMY = {"*", "Xx", "XX", "Du", "DU", ""}
     for spec in cfg.monomers:
@@ -127,7 +134,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
         monomers.append(m)
 
     # 2. Build chain
-    _p(f"Building chain ({cfg.chain.n_monomers} units, mode={cfg.chain.mode})")
+    _stage(2, f"Building chain ({cfg.chain.n_monomers} units, mode={cfg.chain.mode})")
     _p("  (NOTE: mbuild produces a fully-extended initial geometry — that's "
        "expected. The chain will collapse to a realistic conformation during "
        "MD equilibration in LAMMPS/GROMACS.)")
@@ -146,7 +153,10 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
 
     # 3. Optimize chain
     if cfg.optimizer.enabled:
-        _p("Optimizing full chain")
+        _stage(3, "Optimizing full chain")
+    else:
+        _stage(3, "Chain optimisation skipped (disabled)")
+    if cfg.optimizer.enabled:
         optimizer.optimize(chain, ff=cfg.optimizer.ff, steps=cfg.optimizer.steps,
                            tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm)
         structure.write(chain, out_dir / f"{cfg.project_name}_opt.xyz")
@@ -175,7 +185,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
             shutil.copy2(bundled, ff_lt_path)
             _p(f"Copied bundled FF library {bundled.name} -> output dir")
 
-    _p("Assigning atom types")
+    _stage(4, "Assigning atom types")
     # The manual types the user assigned refer to ONE monomer; the chain is n
     # of them with a cap hydrogen deleted at every junction. Hand the monomer
     # and the unit count over so the two numberings can be reconciled exactly
@@ -259,6 +269,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                                        template=template)
         _p(f"Box scaled to target density {cfg.box.density_g_cm3} g/cm³: {box_shape}")
 
+    _stage(5, "Sizing the box")
     # The box, stated in the log as ONE unambiguous line — and sanity-checked.
     #
     # A 206-chain PIB cell once went to GROMACS in a 500 Å box when the Box
@@ -479,12 +490,14 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
     effective_run = cfg.run_moltemplate or use_dlfield
 
     if not effective_run:
+        _stage(6, "Topology: generation-only (moltemplate.sh not run)")
         _p("!" * 60)
         _p("!! GENERATION-ONLY MODE: moltemplate.sh NOT executed.")
         _p("!! Only the scaffold .lt files were written.")
         _p("!! Tick 'Auto-run' on the Export tab to also run moltemplate.sh.")
         _p("!" * 60)
     elif use_dlfield:
+        _stage(6, "Typing with dl_field (" + ff.display_name + ")")
         _p("=" * 60)
         _p("Auto-running dl_field for " + ff.display_name)
         _p("=" * 60)
@@ -533,6 +546,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
             # non-hybrid, ported from create_box_lammps_nonhybrid_chains.py).
             n_chains_wanted = int(cfg.box.n_chains)
             if n_chains_wanted > 1 and cfg.engine in ("lammps", "both"):
+                _stage(7, f"Packing {n_chains_wanted} chains into the box")
                 single_data = None
                 for cand in ("lammps1.data", "lammps.data"):
                     p = out_dir / cand
@@ -703,10 +717,12 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                 )
     else:
         # Moltemplate-native pipeline
+        _stage(6, "Running moltemplate.sh")
         if want_lammps:
             if find_moltemplate():
                 data_file = run_moltemplate(system_lt, work_dir=out_dir)
                 if _pack_after_mt and data_file and Path(data_file).exists():
+                    _stage(7, f"Packing {_n_chains_mt} chains into the box")
                     _p(f"[replicator] Packing {_n_chains_mt} chains into box "
                        f"({box_shape.a:.1f} × {box_shape.b:.1f} × "
                        f"{box_shape.c:.1f} Å) via packmol (falls back to grid)")
@@ -727,6 +743,33 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                     "moltemplate.sh not found; skipping. LAMMPS data will not be generated. "
                     "Install moltemplate to enable this step."
                 )
+
+    # ---- Hybrid -> non-hybrid LAMMPS styles (DL_FIELD route) --------------
+    nonhybrid_files: list = []
+    _style_choice = str(getattr(cfg, "lammps_styles", "hybrid") or "hybrid").lower()
+    if (dlfield_result is not None and want_lammps
+            and _style_choice in ("non_hybrid", "nonhybrid", "both")):
+        from .lammps_hybrid import convert_to_nonhybrid, is_hybrid_input
+        _in = out_dir / "lammps.in"
+        _datas = [out_dir / n for n in ("lammps.data", "lammps1.data", "packed_box.data")]
+        if _in.exists() and is_hybrid_input(_in):
+            _packed = out_dir / "packed_box.data"
+            _rd = "packed_box.data" if _packed.exists() else None
+            _nh_in, _nh_data = convert_to_nonhybrid(
+                _in, _datas, out_dir / "non_hybrid", read_data=_rd)
+            nonhybrid_files = [_nh_in] + list(_nh_data)
+            _p("[styles] Non-hybrid LAMMPS files written to " + str(out_dir / "non_hybrid"))
+            for f in nonhybrid_files:
+                _p("    -> " + str(f))
+            if _rd:
+                _p("[styles] non_hybrid/lammps.in reads packed_box.data "
+                   "(the N-chain box).")
+            dlfield_result.outputs = sorted(
+                set(list(dlfield_result.outputs) + nonhybrid_files), key=str)
+        elif _in.exists():
+            _p("[styles] lammps.in already uses plain styles — nothing to convert")
+
+    _p(f"[stage done/{N_STAGES}] Finished — files in {out_dir}")
 
     # ---- Optional: multi-component blend packing --------------------------
     blend_out = None
@@ -752,5 +795,6 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
         "dlfield_outputs": ([str(p) for p in dlfield_result.outputs]
                             if dlfield_result else []),
         "blend_data": str(blend_out) if blend_out else None,
+        "nonhybrid_files": [str(p) for p in nonhybrid_files],
         "config": asdict(cfg),
     }

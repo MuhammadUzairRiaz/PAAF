@@ -225,6 +225,13 @@ class Config:
     engine: str = "lammps"
     gromacs_include_itp: Optional[str] = None   # e.g. "oplsaa.ff/forcefield.itp"
 
+    # LAMMPS style form for the DL_FIELD route. dl_field writes every style
+    # as "hybrid <one sub-style>" ("hybrid"). "non_hybrid" additionally
+    # writes plain-style copies (bond_style harmonic, coefficient lines
+    # without the sub-style token) into <out_dir>/non_hybrid/.
+    # "both" keeps the dl_field originals AND writes the non_hybrid/ set.
+    lammps_styles: str = "hybrid"                # hybrid | non_hybrid | both
+
     # ----------------------------------------------------- IO
     @classmethod
     def load(cls, path: str | Path) -> "Config":

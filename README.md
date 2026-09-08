@@ -7,7 +7,11 @@ simulation-ready LAMMPS or GROMACS system, end to end:
   build a monomer (SMILES, periodic table, or an uploaded XYZ/PDB/MOL2/SDF
   file), polymerise it to a chain, optimise, assign a force field
   (OPLS 2005 / PCFF / COMPASS / CVFF / CHARMM36 via DL_FIELD, or
-  OPLS-AA / GAFF via moltemplate), pack a box, export.
+  OPLS-AA / GAFF via moltemplate), pack a box with packmol, export.
+  The Export page shows a step-by-step progress bar, and for the
+  dl_field route you can choose **hybrid** (as dl_field writes it) or
+  **non-hybrid** LAMMPS styles (plain `bond_style harmonic`, written to
+  `non_hybrid/`).
 - **Amorphous cell:** grows chains bond-by-bond into a periodic box
   (Theodorou–Suter growth with RIS torsion statistics), back-maps to all
   atoms, resolves overlaps with a soft push-off, and types the finished
