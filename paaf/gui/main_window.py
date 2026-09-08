@@ -181,6 +181,7 @@ class MainWindow(QMainWindow):
         self.sidebar = Sidebar(NAV_ITEMS, PIPELINE_INDICES)
         self.sidebar.currentRowChanged.connect(self._on_nav)
         self.sidebar.projectClicked.connect(self._edit_project)
+        self.sidebar.clearAllClicked.connect(self._clear_all)
         top.addWidget(self.sidebar)
 
         # ---- pages container
@@ -1239,7 +1240,12 @@ class MainWindow(QMainWindow):
         self.btn_run.clicked.connect(self._start_run)
         b_save = QPushButton("Save config..."); b_save.clicked.connect(self._save_config)
         b_load = QPushButton("Load config..."); b_load.clicked.connect(self._load_config)
-        row.addWidget(self.btn_run); row.addWidget(b_save); row.addWidget(b_load); row.addStretch(1)
+        b_clear = QPushButton("Clear all — new polymer")
+        b_clear.setToolTip("Reset every step and the log to start the next "
+                           "polymer from a clean state. Output files are kept.")
+        b_clear.clicked.connect(self._clear_all)
+        row.addWidget(self.btn_run); row.addWidget(b_save); row.addWidget(b_load)
+        row.addStretch(1); row.addWidget(b_clear)
         v.addLayout(row)
         v.addStretch(1)
         return page
@@ -1783,6 +1789,51 @@ class MainWindow(QMainWindow):
     def _new_project(self):
         self._apply_config(Config())
         self._sync_project_label()
+
+    def _clear_all(self) -> None:
+        """Reset the whole pipeline to a clean state for the next polymer.
+
+        Keeps what is expensive to re-enter and not polymer-specific: the
+        output directory and the DL_FIELD lib dir. Files on disk are never
+        touched.
+        """
+        if getattr(self, "_thread", None) is not None and self._thread.isRunning():
+            QMessageBox.information(self, "Still running",
+                                    "Wait for the current build to finish first.")
+            return
+        ans = QMessageBox.question(
+            self, "Clear all",
+            "Reset every pipeline step (monomers, chain, optimiser, force "
+            "field, box, export settings) and the log?\n\n"
+            "Files already written to the output folder are kept.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ans != QMessageBox.Yes:
+            return
+        keep_out = self.output_dir.text()
+        keep_lib = self.ff_dl_lib.text() if hasattr(self, "ff_dl_lib") else ""
+        cfg = Config()
+        cfg.output_dir = keep_out
+        cfg.force_field.dl_lib_dir = keep_lib or None
+        self._apply_config(cfg)
+        # Builder inputs that are not part of the config
+        bt = self.builder_tab
+        for attr in ("smiles_edit",):
+            w = getattr(bt, attr, None)
+            if w is not None:
+                w.clear()
+        if hasattr(bt, "monomer_table"):
+            bt.monomer_table.setRowCount(0)
+        # Log, progress, sidebar
+        self.console.clear()
+        if hasattr(self, "run_bar"):
+            self.run_bar.setValue(0)
+            self.run_bar.setStyleSheet("")
+            self.run_status.setText("Ready — click Generate files.")
+        self.sidebar.reset()
+        self.sidebar.setCurrentRow(0)
+        self._sync_project_label()
+        self.statusBar().showMessage("Cleared — start with a new monomer on the Builder page.", 6000)
+        self._append_log("Cleared all steps. Output dir and DL_FIELD lib dir kept.")
 
     def _save_config(self) -> None:
         cfg = self._build_config()

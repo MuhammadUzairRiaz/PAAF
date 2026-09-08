@@ -175,3 +175,15 @@ def test_pipeline_stage_lines_are_parseable():
     assert parse_stage("[stage 3/7] x") is not None
     assert parse_stage(f"[stage done/7] Finished") is not None
     assert 'f"[stage {k}/{N_STAGES}] {label}"' in src
+
+
+def test_clear_all_is_wired_in_sidebar_and_export():
+    src_mw = Path("paaf/gui/main_window.py").read_text()
+    src_sb = Path("paaf/gui/sidebar.py").read_text()
+    assert "clearAllClicked = pyqtSignal()" in src_sb and "def reset(self)" in src_sb
+    assert "self.sidebar.clearAllClicked.connect(self._clear_all)" in src_mw
+    assert 'QPushButton("Clear all — new polymer")' in src_mw
+    assert "def _clear_all(self)" in src_mw
+    # output dir and DL_FIELD lib dir survive a clear
+    body = src_mw.split("def _clear_all(self)")[1].split("def _save_config")[0]
+    assert "keep_out" in body and "keep_lib" in body and "self.console.clear()" in body

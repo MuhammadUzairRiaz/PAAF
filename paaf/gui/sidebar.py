@@ -35,8 +35,8 @@ from typing import List, Optional, Sequence, Tuple
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QPainter
 from PyQt5.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QSizePolicy, QStyle, QStyleOption,
-    QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QStyle,
+    QStyleOption, QVBoxLayout, QWidget,
 )
 
 from . import tokens as T
@@ -186,6 +186,7 @@ class Sidebar(QWidget):
 
     currentRowChanged = pyqtSignal(int)
     projectClicked = pyqtSignal()      # user clicked the project name block
+    clearAllClicked = pyqtSignal()     # "Clear all" in the progress card
 
     def __init__(self, nav_items: Sequence[Tuple[str, str]],
                  pipeline_indices: Sequence[int], parent=None):
@@ -289,6 +290,20 @@ class Sidebar(QWidget):
         self.progress_lb.setStyleSheet(
             f"color: #FFFFFF; font-size: {T.FS_BODY}px; background: transparent;")
         cv.addWidget(self.progress_lb)
+        self.btn_clear = QPushButton("Clear all — start a new polymer")
+        self.btn_clear.setCursor(Qt.PointingHandCursor)
+        self.btn_clear.setToolTip(
+            "Reset every pipeline step (monomers, chain, force field, box, "
+            "log) so you can build the next polymer from a clean state. "
+            "Files already written to the output folder are kept.")
+        self.btn_clear.setStyleSheet(
+            f"QPushButton {{ color: #E2E8F0; background: transparent;"
+            f" border: 1px solid #475569; border-radius: 6px; padding: 4px 8px;"
+            f" font-size: {T.FS_CAPTION}px; text-align: left; }}"
+            f"QPushButton:hover {{ background: #334155; border-color: #94A3B8; }}")
+        self.btn_clear.clicked.connect(self.clearAllClicked.emit)
+        cv.addSpacing(4)
+        cv.addWidget(self.btn_clear)
         wrap = QWidget()
         wl = QVBoxLayout(wrap)
         wl.setContentsMargins(12, 10, 12, 0)
@@ -357,6 +372,15 @@ class Sidebar(QWidget):
             self._done.add(row)
         else:
             self._done.discard(row)
+        self._refresh_states()
+
+    def reset(self) -> None:
+        """Forget every completed step and go back to the first one."""
+        self._done.clear()
+        for it in self._items:
+            it.set_result("")
+        if self._pipeline:
+            self.setCurrentRow(self._pipeline[0])
         self._refresh_states()
 
     def _refresh_states(self) -> None:
