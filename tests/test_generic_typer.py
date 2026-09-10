@@ -122,12 +122,12 @@ def test_assigner_routes_moltemplate_ffs_to_generic(monkeypatch):
     monkeypatch.setattr(ff_assigner, "_which", lambda exe: None)
     ff_assigner.assign(mol, get_ff("gaff"))
     assert {a.ff_type for a in mol.atoms} == {"c3", "hc"}
-    # manual-strategy UA FF gets heavy atoms filled, H left -> reported
+    # manual-strategy UA FF: heavy atoms filled, H left untyped (absorbed at export)
     for a in mol.atoms:
         a.ff_type = None
-    with pytest.raises(ValueError):
-        ff_assigner.assign(mol, get_ff("trappe_ua"))
+    ff_assigner.assign(mol, get_ff("trappe_ua"))
     assert all(a.ff_type for a in mol.atoms if a.element != "H")
+    assert all(not a.ff_type for a in mol.atoms if a.element == "H")
 
 
 def test_dialog_uses_generic_typer_for_non_opls():

@@ -275,6 +275,18 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                 f"mass and charge, and nothing downstream would object. "
                 f"First: atom {_problems[0][0]} — {_problems[0][1]}")
 
+    # 4b. United-atom beads: absorb hydrogens (UA-only force field, or the
+    # Advanced typing UA/AA mix). New chain, fewer atoms, bead masses noted.
+    _hyb = None
+    _ua_key = getattr(cfg.force_field, "ua_secondary_key", None)
+    if ff.kind == "moltemplate_native" and (ff.united_atom or _ua_key):
+        from .ua_hybrid import apply_hybrid
+        _ua_ff = ff if ff.united_atom else get_ff(_ua_key)
+        _hyb = apply_hybrid(chain, ff, _ua_ff, out_dir, _p)
+        chain = _hyb.chain
+        chain.name = cfg.project_name
+        structure.write(chain, out_dir / f"{cfg.project_name}_ua.mol2")
+
     # Sanity check: for Moltemplate-native FFs the atom types produced by
     # OpenBabel/Ghemical (e.g. "C.3", "H") do NOT match the numeric or
     # symbolic types used inside oplsaa2024.lt / gaff.lt / dreiding.lt etc.
@@ -345,6 +357,8 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
             {"H": 1.008, "C": 12.011, "N": 14.007, "O": 15.999, "F": 18.998,
              "Si": 28.085, "P": 30.974, "S": 32.06, "Cl": 35.45,
              "Br": 79.904}.get(a.element, 12.0) for a in chain.atoms)
+        if _hyb is not None:
+            _mass_g += _n_for_density * _hyb.removed_h * 1.008   # absorbed H
         _rho = (_mass_g / 6.02214076e23) / (box_shape.volume_ang3() * 1e-24)
         _p(f"Box density check: {_n_for_density} chain(s) in this box "
            f"≈ {_rho:.3f} g/cm³")
@@ -409,7 +423,11 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
     _pack_after_mt = (ff.kind != "dlfield" and _n_chains_mt > 1)
     if ff.kind != "dlfield":
         _p("Writing Moltemplate files")
-        chain_lt = lt_writer.write_chain_lt(chain, out_dir, ff, name=cfg.project_name)
+        chain_lt = lt_writer.write_chain_lt(
+            chain, out_dir, ff, name=cfg.project_name,
+            inherit=(_hyb.inherit if _hyb else None),
+            lt_include=(_hyb.lt_include if _hyb else None),
+            bond_type=(_hyb.bond_type if _hyb else None))
         system_lt = lt_writer.write_system_lt(
             out_dir, chain_lt, n_chains=1,
             box=list(box_shape.bounding_box()),
@@ -790,6 +808,10 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
         if want_lammps:
             if find_moltemplate():
                 data_file = run_moltemplate(system_lt, work_dir=out_dir, cancel=cancel)
+                if _hyb is not None and _hyb.bead_masses:
+                    from .ua_hybrid import patch_data_masses
+                    _nm = patch_data_masses(Path(data_file), _hyb.bead_masses)
+                    _p(f"[united-atom] bead masses written for {_nm} type(s) in {Path(data_file).name}")
                 if _pack_after_mt and data_file and Path(data_file).exists():
                     _stage(7, f"Packing {_n_chains_mt} chains into the box")
                     _p(f"[replicator] Packing {_n_chains_mt} chains into box "

@@ -832,8 +832,18 @@ class MainWindow(QMainWindow):
         _bw.setContentsMargins(T.PAD_PAGE, 0, 0, 0)
         b_types = _btn("Pick atom types visually…")
         b_types.clicked.connect(self._open_atom_typing_dialog)
+        b_adv = _btn("Advanced: mix united-atom + all-atom…")
+        b_adv.setToolTip(
+            "Manual typing with a second, united-atom library (TraPPE-UA or "
+            "OPLS-UA). Give some carbons UA bead types (CH3/CH2/CH) — their "
+            "hydrogens are absorbed at export; the rest stays all-atom.")
+        b_adv.clicked.connect(self._open_advanced_typing_dialog)
+        self.ua_mix_lb = QLabel("")
+        self.ua_mix_lb.setProperty("role", "hint")
+        self._ua_secondary_key = None
         _bw.addWidget(action_bar(
-            "Types are assigned when you generate files.", [b_types]))
+            "Types are assigned when you generate files.", [b_adv, b_types]))
+        _bw.addWidget(self.ua_mix_lb)
         v.addWidget(_bar_wrap)
 
         self._on_ff_changed(0)
@@ -1493,6 +1503,76 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(
                 f"Applied {len(overrides)} manual atom-type overrides.", 5000)
 
+    def _open_advanced_typing_dialog(self) -> None:
+        """Manual typing with a secondary united-atom library (UA/AA mix)."""
+        from ..ff_registry import get_ff
+        from .advanced_typing_dialog import AdvancedTypingDialog
+        specs = self.builder_tab.monomer_specs()
+        if not specs:
+            QMessageBox.warning(self, "No monomers",
+                                "Add at least one monomer on the Builder page first.")
+            return
+        key = self.ff_combo.currentData()
+        if not key:
+            return
+        ff = get_ff(key)
+        lt_path = ff.bundled_path() if ff.bundled_lt else None
+        if ff.kind != "moltemplate_native" or lt_path is None or not lt_path.exists():
+            QMessageBox.information(
+                self, "All-atom Moltemplate force field needed",
+                "UA/AA mixing works on the Moltemplate route: choose an all-atom "
+                "library (OPLS-AA 2024 recommended — its own UA block mixes "
+                "exactly) as the main force field, then pick the united-atom "
+                "library inside the dialog.")
+            return
+        if ff.united_atom:
+            QMessageBox.information(
+                self, "Main force field is united-atom",
+                f"{ff.display_name} is itself united-atom: every carbon typed "
+                f"as a bead loses its hydrogens automatically, no mixing "
+                f"needed. To mix, pick the all-atom library as the main one.")
+            return
+        initial: dict[int, str] = {}
+        for line in self.ff_manual_types.toPlainText().splitlines():
+            line = line.strip()
+            if line and ":" in line:
+                k, v = line.split(":", 1)
+                try:
+                    initial[int(k.strip())] = v.strip()
+                except ValueError:
+                    pass
+        dlg = AdvancedTypingDialog(
+            monomer_files=[s.file for s in specs],
+            ff_lt_path=lt_path,
+            initial_types=initial,
+            parent=self,
+            ff_key=ff.key,
+            ff_inherit=ff.inherit,
+            monomer_specs=specs,
+            ua_key=self._ua_secondary_key,
+        )
+        if dlg.exec_() == dlg.Accepted:
+            overrides = dlg.overrides()
+            self.ff_manual_types.setPlainText(
+                "\n".join(f"{k}:{v}" for k, v in sorted(overrides.items())))
+            self._ua_secondary_key = dlg.ua_key()
+            self._refresh_ua_mix_label()
+            n_ua = sum(1 for v in overrides.values() if v.startswith("UA:"))
+            self.statusBar().showMessage(
+                f"Applied {len(overrides)} manual atom types ({n_ua} united-atom beads).", 6000)
+
+    def _refresh_ua_mix_label(self) -> None:
+        if getattr(self, "_ua_secondary_key", None):
+            from ..ff_registry import get_ff
+            try:
+                name = get_ff(self._ua_secondary_key).display_name
+            except Exception:
+                name = self._ua_secondary_key
+            self.ua_mix_lb.setText(f"UA/AA mixing ON — beads from {name}; their "
+                                   f"hydrogens are absorbed at export.")
+        else:
+            self.ua_mix_lb.setText("")
+
     def _browse_dl_lib(self) -> None:
         # Browsing always temporarily unlocks the field so we can write to it.
         d = QFileDialog.getExistingDirectory(self, "Select DL_FIELD lib directory")
@@ -1689,6 +1769,9 @@ class MainWindow(QMainWindow):
                 key=self.ff_combo.currentData(),
                 dl_lib_dir=self.ff_dl_lib.text() or None,
                 manual_types=manual_types,
+                ua_secondary_key=(getattr(self, "_ua_secondary_key", None)
+                                  if any(str(v).startswith("UA:")
+                                         for v in manual_types.values()) else None),
             ),
             lammps=LammpsCfg(
                 ensemble=self.lmp_ensemble.currentText(),
@@ -1734,6 +1817,9 @@ class MainWindow(QMainWindow):
                 self.ff_combo.setCurrentIndex(i); break
         self.ff_dl_lib.setReadOnly(False)
         self.ff_dl_lib.setText(cfg.force_field.dl_lib_dir or "")
+        self._ua_secondary_key = getattr(cfg.force_field, "ua_secondary_key", None)
+        if hasattr(self, "ua_mix_lb"):
+            self._refresh_ua_mix_label()
         # Re-lock after applying config if the loaded path is valid.
         p = self.ff_dl_lib.text().strip()
         self._set_dl_lib_locked(bool(p) and Path(p).exists())

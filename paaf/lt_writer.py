@@ -103,6 +103,9 @@ def write_chain_lt(
     out_dir: str | Path,
     ff: ForceField,
     name: str = "polymer",
+    inherit: Optional[str] = None,
+    lt_include: Optional[str] = None,
+    bond_type: Optional[str] = None,
 ) -> Path:
     """Write a full-chain .lt (single self-contained object).
 
@@ -116,9 +119,11 @@ def write_chain_lt(
     fname = out_dir / f"{name}.lt"
 
     lines: List[str] = []
-    if ff.lt_include:
-        lines.append(f'import "{ff.lt_include}"')
-    parent = f" inherits {ff.inherit}" if ff.inherit else ""
+    include = lt_include or ff.lt_include
+    parent_name = inherit or ff.inherit
+    if include:
+        lines.append(f'import "{include}"')
+    parent = f" inherits {parent_name}" if parent_name else ""
     lines.append("")
     lines.append(f"{name}{parent} {{")
     lines.append("")
@@ -127,9 +132,16 @@ def write_chain_lt(
         lines.append(_atom_line(a, name))
     lines.append("    }")
     lines.append("")
-    lines.append("    write('Data Bond List') {")
-    for k, (i, j, _) in enumerate(chain.bonds):
-        lines.append(_bond_line(k, i, j, chain.atoms))
+    if bond_type:
+        # Libraries without "Data Bonds By Type" (TraPPE) need explicit types.
+        lines.append("    write('Data Bonds') {")
+        for k, (i, j, _) in enumerate(chain.bonds):
+            lines.append(f"    $bond:b{k} @bond:{bond_type} "
+                         f"$atom:{chain.atoms[i].name} $atom:{chain.atoms[j].name}")
+    else:
+        lines.append("    write('Data Bond List') {")
+        for k, (i, j, _) in enumerate(chain.bonds):
+            lines.append(_bond_line(k, i, j, chain.atoms))
     lines.append("    }")
     lines.append(f"}} # {name}")
     fname.write_text("\n".join(lines) + "\n")

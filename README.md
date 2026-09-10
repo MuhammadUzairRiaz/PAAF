@@ -25,6 +25,14 @@ simulation-ready LAMMPS or GROMACS system, end to end:
   Kremer-Grest bead-spring cell (FENE bonds, WCA beads, chain stiffness
   fitted to the polymer's measured C_n) — reduced or real units, one or
   several species. Needs only LAMMPS: no DL_FIELD, no packmol.
+- **United-atom & hybrid typing (Force field → *Advanced: mix
+  united-atom + all-atom…*):** every bundled Moltemplate library
+  (OPLS-AA, COMPASS, DREIDING, GAFF, TraPPE-UA, OPLS-UA) is typed
+  automatically. A united-atom library can be mixed into an all-atom chain:
+  give some carbons UA bead types (CH3/CH2/CH) and their hydrogens are
+  absorbed at export, with bead masses and LJ from the UA library and
+  bonded terms resolved across the boundary (OPLS-AA 2024 + OPLS-UA 2024
+  natively; TraPPE-UA via a generated `paaf_ua_bridge.lt`).
 - **Reaction scheme (inside Builder):** define reactions with atom-mapped
   SMILES (53 built-in worked examples), export typed reactant/product
   structures and learned reaction templates.

@@ -111,6 +111,11 @@ class ForceFieldCfg:
     dl_lib_dir: Optional[str] = None    # path to dl_f_4.13/lib
     manual_types: Dict[int, str] = field(default_factory=dict)
     convert_par_to: Optional[str] = None  # emit converted .lt to this path
+    # Advanced typing: a second, united-atom Moltemplate library (trappe_ua
+    # or oplsua_2024) whose bead types may be assigned to some atoms of an
+    # all-atom chain. Such types are stored as "UA:<id>" in manual_types;
+    # their hydrogens are absorbed at export (see paaf.ua_hybrid).
+    ua_secondary_key: Optional[str] = None
 
 
 @dataclass

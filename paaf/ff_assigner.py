@@ -127,8 +127,11 @@ def assign(
             for a in mol.atoms:
                 if not a.ff_type and a.index in auto:
                     a.ff_type = auto[a.index]
-        if not all(a.ff_type for a in mol.atoms):
-            missing = [a.index for a in mol.atoms if not a.ff_type]
+        # A united-atom library has no hydrogen types: untyped H atoms are
+        # absorbed into their beads at export (paaf.ua_hybrid), not an error.
+        _need = [a for a in mol.atoms if not (ff.united_atom and a.element == "H")]
+        if not all(a.ff_type for a in _need):
+            missing = [a.index for a in _need if not a.ff_type]
             raise ValueError(
                 f"manual atom typing requested but atoms {missing} have no type set"
             )
