@@ -67,3 +67,52 @@ def test_export_cell_with_cancel_token_builds_untyped(tmp_path):
     exp = export_cell(res, comp.grow_specs(), tmp_path, name="pe",
                       ff_key="", push_off=False, cancel=CancelToken())
     assert exp.bead_xyz is not None
+
+
+def test_pipeline_cancel_token_stops_before_any_work(tmp_path):
+    import inspect
+    from paaf.cell.packing import CancelToken
+    from paaf.config import Config
+    from paaf.pipeline import PipelineCancelled, run_pipeline
+    cfg = Config(); cfg.output_dir = str(tmp_path); cfg.project_name = "x"
+    tok = CancelToken(); tok.cancel()
+    seen = []
+    with pytest.raises(PipelineCancelled):
+        run_pipeline(cfg, progress=seen.append, cancel=tok)
+    assert len(seen) == 1 and seen[0].startswith("[stage 1/")     # stopped at the first line
+
+
+def test_cancel_reaches_every_external_program():
+    """dl_field, moltemplate.sh, packmol and the optimiser all take `cancel`."""
+    import inspect
+    from paaf import optimizer, moltemplate_runner, lammps_replicator, dlfield_runner
+    from paaf.geometry_repair import ensure_clean_geometry, relax_topology
+    for fn in (optimizer.optimize, moltemplate_runner.run_moltemplate,
+               lammps_replicator.replicate_single_chain, lammps_replicator._pack_with_packmol,
+               dlfield_runner.run_dlfield, ensure_clean_geometry, relax_topology):
+        assert "cancel" in inspect.signature(fn).parameters, fn.__name__
+
+
+def test_run_cancellable_kills_child_reading_stdin(tmp_path):
+    import sys
+    from paaf.cell.packing import CancelToken, PackCancelled, run_cancellable
+    tok = CancelToken()
+    import threading
+    threading.Timer(0.3, tok.cancel).start()
+    inp = tmp_path / "in.txt"; inp.write_text("x\n")
+    with inp.open() as fh, pytest.raises(PackCancelled):
+        run_cancellable([sys.executable, "-c", "import time; time.sleep(30)"],
+                        stdin=fh, cancel=tok, poll_s=0.1)
+
+
+def test_geometry_repair_honours_cancel():
+    import numpy as np
+    from paaf.cell.packing import CancelToken, PackCancelled
+    from paaf.geometry_repair import relax_topology
+    from paaf.structure import Atom, Molecule
+    mol = Molecule(atoms=[Atom(index=i, element="C", xyz=np.array([0.3 * i, 0, 0]))
+                          for i in range(6)],
+                   bonds=[(i, i + 1, 1.0) for i in range(5)])
+    tok = CancelToken(); tok.cancel()
+    with pytest.raises(PackCancelled):
+        relax_topology(mol, cancel=tok)

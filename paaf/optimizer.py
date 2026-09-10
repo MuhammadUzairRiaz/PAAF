@@ -51,6 +51,7 @@ def optimize(
     algorithm: Literal["cg", "sd"] = "cg",
     fallback: bool = True,
     strict: bool = False,
+    cancel=None,
 ) -> Molecule:
     """Minimize `mol` in place with an OpenBabel force field.
 
@@ -118,10 +119,27 @@ def optimize(
              mol.name, used_ff, algorithm, steps, tol)
     try:
         e_initial = force_field.Energy()
-        if algorithm == "cg":
-            force_field.ConjugateGradients(steps, tol)
+        if cancel is None:
+            if algorithm == "cg":
+                force_field.ConjugateGradients(steps, tol)
+            else:
+                force_field.SteepestDescent(steps, tol)
         else:
-            force_field.SteepestDescent(steps, tol)
+            # Step-wise so a Cancel click is honoured within ~a chunk rather
+            # than after the whole minimisation.
+            chunk = 50
+            if algorithm == "cg":
+                force_field.ConjugateGradientsInitialize(steps, tol)
+                take = force_field.ConjugateGradientsTakeNSteps
+            else:
+                force_field.SteepestDescentInitialize(steps, tol)
+                take = force_field.SteepestDescentTakeNSteps
+            while True:
+                if cancel.is_cancelled():
+                    from .cell.packing import PackCancelled
+                    raise PackCancelled("cancelled during optimisation")
+                if not take(chunk):
+                    break
         force_field.GetCoordinates(obmol.OBMol)
         for a, ob_atom in zip(mol.atoms, obmol.atoms):
             a.xyz[:] = ob_atom.coords

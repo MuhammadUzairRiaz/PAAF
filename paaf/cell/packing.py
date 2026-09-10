@@ -107,7 +107,7 @@ class CancelToken:
 
 
 def run_cancellable(cmd, *, cwd=None, timeout_s=None, cancel=None,
-                    poll_s=0.5):
+                    poll_s=0.5, stdin=None):
     """subprocess.run, but killable: polls ``cancel`` (a CancelToken) and
     kills the child the moment it is set, raising PackCancelled.
 
@@ -118,8 +118,8 @@ def run_cancellable(cmd, *, cwd=None, timeout_s=None, cancel=None,
     import subprocess as _sp
     import time as _time
 
-    proc = _sp.Popen(cmd, cwd=cwd, stdout=_sp.PIPE, stderr=_sp.PIPE,
-                     text=True)
+    proc = _sp.Popen(cmd, cwd=cwd, stdin=stdin, stdout=_sp.PIPE,
+                     stderr=_sp.PIPE, text=True)
     start = _time.monotonic()
     while True:
         try:

@@ -20,8 +20,11 @@ def run_moltemplate(
     work_dir: str | Path | None = None,
     xyz: str | Path | None = None,
     extra_args: Optional[list[str]] = None,
+    cancel=None,
 ) -> Path:
-    """Run moltemplate.sh on `system_lt` and return path to the .data file."""
+    """Run moltemplate.sh on `system_lt` and return path to the .data file.
+
+    ``cancel`` (a CancelToken) kills moltemplate.sh the moment it is set."""
     exe = find_moltemplate()
     if not exe:
         raise RuntimeError(
@@ -37,7 +40,10 @@ def run_moltemplate(
         cmd += list(extra_args)
     cmd.append(system_lt.name)
     log.info("Running moltemplate: %s (cwd=%s)", " ".join(cmd), wd)
-    proc = subprocess.run(cmd, cwd=str(wd), capture_output=True, text=True)
+    from .cell.packing import run_cancellable
+    from types import SimpleNamespace
+    rc, out, err = run_cancellable(cmd, cwd=str(wd), cancel=cancel)
+    proc = SimpleNamespace(returncode=rc, stdout=out, stderr=err)
 
     # Always persist moltemplate's full stdout+stderr so the user can inspect
     # it in the output directory.

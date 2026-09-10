@@ -174,7 +174,7 @@ def test_pipeline_stage_lines_are_parseable():
     src = Path(pl.__file__).read_text()
     assert parse_stage("[stage 3/7] x") is not None
     assert parse_stage(f"[stage done/7] Finished") is not None
-    assert 'f"[stage {k}/{N_STAGES}] {label}"' in src
+    assert 'f"[stage {k}/{_N_STAGES}] {label}"' in src
 
 
 def test_clear_all_is_wired_in_sidebar_and_export():

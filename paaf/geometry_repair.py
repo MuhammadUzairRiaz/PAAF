@@ -139,7 +139,7 @@ def _angle_triplets(mol: Molecule):
 
 def relax_topology(mol: Molecule, seed: int = 7, stages=(0.5, 2.0, 8.0, 30.0),
                    kb: float = 200.0, ka: float = 40.0, rc_pad: float = 1.2,
-                   iters: int = 400) -> bool:
+                   iters: int = 400, cancel=None) -> bool:
     """Fast, size-independent clash removal driven by the bond graph.
 
     Minimises harmonic bonds (to covalent-radius lengths), harmonic angle
@@ -221,6 +221,9 @@ def relax_topology(mol: Molecule, seed: int = 7, stages=(0.5, 2.0, 8.0, 30.0),
 
     for A in stages:
         for _ in range(3):
+            if cancel is not None and cancel.is_cancelled():
+                from .cell.packing import PackCancelled
+                raise PackCancelled("cancelled during geometry repair")
             tree = cKDTree(x)
             pr = np.array([p for p in tree.query_pairs(rc_max) if p not in excl],
                           dtype=int).reshape(-1, 2)
@@ -289,7 +292,8 @@ def rebuild_coordinates(mol: Molecule, seed: int = 7,
     return best_score == 0
 
 
-def ensure_clean_geometry(mol: Molecule, log_fn=None, seed: int = 7) -> bool:
+def ensure_clean_geometry(mol: Molecule, log_fn=None, seed: int = 7,
+                          cancel=None) -> bool:
     """Check ``mol``; rebuild its coordinates if clashed. Returns cleanliness.
 
     ``log_fn`` receives human-readable progress lines (the pipeline's ``_p``).
@@ -304,7 +308,7 @@ def ensure_clean_geometry(mol: Molecule, log_fn=None, seed: int = 7) -> bool:
         f"{len(bad)} distorted bond(s) in {mol.name} (e.g. {ex or 'bond only'}). "
         f"Relaxing against the bond topology (soft push-off) — "
         f"a distance-based typer such as dl_field would misread this structure.")
-    ok = relax_topology(mol, seed=seed)
+    ok = relax_topology(mol, seed=seed, cancel=cancel)
     rnd = 0
     while not ok and rnd < 3:
         # Residual overlaps: nudge the offending atoms apart and harden the
@@ -313,7 +317,8 @@ def ensure_clean_geometry(mol: Molecule, log_fn=None, seed: int = 7) -> bool:
         rng = np.random.default_rng(seed + rnd)
         for i, j, _ in find_clashes(mol)[0]:
             mol.atoms[i].xyz = mol.atoms[i].xyz + rng.normal(0, 0.4, 3)
-        ok = relax_topology(mol, seed=seed + rnd, stages=(8.0, 30.0, 100.0))
+        ok = relax_topology(mol, seed=seed + rnd, stages=(8.0, 30.0, 100.0),
+                            cancel=cancel)
     if not ok and len(mol.atoms) <= 700:
         say("Geometry check: push-off left residual overlaps — re-embedding "
             "from scratch (RDKit ETKDG).")

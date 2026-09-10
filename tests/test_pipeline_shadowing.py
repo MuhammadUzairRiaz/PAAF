@@ -45,8 +45,9 @@ def _local_assigns(func: ast.FunctionDef) -> set[str]:
 def test_run_pipeline_does_not_shadow_module_imports():
     tree = _load_pipeline_ast()
     imports = _module_imports(tree)
+    found = 0
     for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == "run_pipeline":
+        if isinstance(node, ast.FunctionDef) and node.name in ("run_pipeline", "_run_pipeline_body"):
             locals_ = _local_assigns(node)
             overlap = imports & locals_
             assert not overlap, (
@@ -54,5 +55,5 @@ def test_run_pipeline_does_not_shadow_module_imports():
                 f"scope: {sorted(overlap)}. Rename these locals to avoid "
                 f"UnboundLocalError."
             )
-            return
-    raise AssertionError("run_pipeline function not found in pipeline.py")
+            found += 1
+    assert found == 2, "run_pipeline / _run_pipeline_body not found in pipeline.py"

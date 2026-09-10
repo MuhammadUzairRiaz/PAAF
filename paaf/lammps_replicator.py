@@ -244,7 +244,7 @@ def _find_packmol(explicit: Optional[str] = None) -> Optional[str]:
 
 def _pack_with_packmol(single_pdb: Path, n: int, box_edges: Tuple[float, float, float],
                       out_pdb: Path, tolerance: float = 2.0, seed: int = -1,
-                      packmol_path: Optional[str] = None) -> bool:
+                      packmol_path: Optional[str] = None, cancel=None) -> bool:
     """Pack ``n`` copies of ``single_pdb`` into a box via packmol.
 
     ``seed`` semantics:
@@ -284,8 +284,11 @@ def _pack_with_packmol(single_pdb: Path, n: int, box_edges: Tuple[float, float, 
     log_path = out_pdb.parent / "packmol.log"
     log.info("Packing %d copies into %.1fx%.1fx%.1f Å (log: %s)",
              n, a, b, c, log_path)
+    from .cell.packing import run_cancellable
+    from types import SimpleNamespace
     with inp.open() as fh:
-        proc = subprocess.run([exe], stdin=fh, capture_output=True, text=True)
+        rc, out, err = run_cancellable([exe], stdin=fh, cancel=cancel)
+    proc = SimpleNamespace(returncode=rc, stdout=out, stderr=err)
     try:
         log_path.write_text(
             "$ " + exe + " < " + str(inp) + "\n\n"
@@ -400,6 +403,7 @@ def replicate_single_chain(
     seed: int = -1,
     tolerance: float = 2.0,
     packmol_path: Optional[str] = None,
+    cancel=None,
 ) -> Path:
     """Given a single-chain LAMMPS data file, produce packed_box.data
     containing `n_chains` copies packed inside `box_edges` (Å).
@@ -413,7 +417,8 @@ def replicate_single_chain(
     packed_pdb = work / "packed.pdb"
     _used_packmol = _pack_with_packmol(
         single_pdb, n_chains, box_edges, packed_pdb,
-        tolerance=tolerance, seed=seed, packmol_path=packmol_path)
+        tolerance=tolerance, seed=seed, packmol_path=packmol_path,
+        cancel=cancel)
     if not _used_packmol:
         # If a packmol binary WAS found but the run failed, that's a hard
         # error the user needs to see (bad tolerance, tiny box, corrupt PDB,

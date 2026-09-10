@@ -78,20 +78,47 @@ def _hoist_dlfield_outputs(out_dir: Path, engine: str) -> list[Path]:
     return hoisted
 
 
-def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) -> dict:
-    """Execute the whole pipeline described by `cfg` and return summary."""
+_N_STAGES = 7
+
+
+class PipelineCancelled(RuntimeError):
+    """The user pressed Cancel; nothing is wrong with the inputs."""
+
+
+def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None,
+                 cancel=None) -> dict:
+    """Execute the whole pipeline described by `cfg` and return summary.
+
+    ``cancel`` is a :class:`paaf.cell.packing.CancelToken`. It is polled at
+    every log line and inside the long steps (optimiser chunks, geometry
+    push-off stages), and external programs (dl_field, moltemplate.sh,
+    packmol) are killed the moment it is set. Raises PipelineCancelled.
+    """
+    from .cell.packing import PackCancelled
+
+    def _check() -> None:
+        if cancel is not None and cancel.is_cancelled():
+            raise PipelineCancelled("cancelled by user")
+
     def _p(msg: str) -> None:
         log.info(msg)
         if progress:
             progress(msg)
+        _check()
 
     # Stage markers. The GUI parses "[stage k/N] label" to drive its
     # progress bar; everything else is plain log text.
-    N_STAGES = 7
-
     def _stage(k: int, label: str) -> None:
-        _p(f"[stage {k}/{N_STAGES}] {label}")
+        _p(f"[stage {k}/{_N_STAGES}] {label}")
 
+    try:
+        return _run_pipeline_body(cfg, _p, _stage, _check, cancel)
+    except PackCancelled as exc:
+        raise PipelineCancelled(str(exc)) from exc
+
+
+def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
+    from .cell.packing import PackCancelled  # noqa: F401  (re-raised by caller)
     out_dir = Path(cfg.output_dir) / cfg.project_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -129,6 +156,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                 steps=cfg.optimizer.steps,
                 tol=cfg.optimizer.tol,
                 algorithm=cfg.optimizer.algorithm,
+                cancel=cancel,
             )
         structure.write(m.molecule, out_dir / f"{m.name}_opt.xyz")
         monomers.append(m)
@@ -158,7 +186,8 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
         _stage(3, "Chain optimisation skipped (disabled)")
     if cfg.optimizer.enabled:
         optimizer.optimize(chain, ff=cfg.optimizer.ff, steps=cfg.optimizer.steps,
-                           tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm)
+                           tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm,
+                           cancel=cancel)
         structure.write(chain, out_dir / f"{cfg.project_name}_opt.xyz")
 
     # 3b. Geometry sanity: mbuild's straight-line join overlaps bulky side
@@ -169,16 +198,19 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
     from .geometry_repair import ensure_clean_geometry, is_clean
     _geom_ok = True
     if not is_clean(chain):
-        _geom_ok = ensure_clean_geometry(chain, _p, seed=int(cfg.chain.seed or 7))
+        _geom_ok = ensure_clean_geometry(chain, _p, seed=int(cfg.chain.seed or 7),
+                                         cancel=cancel)
         if _geom_ok and cfg.optimizer.enabled:
             # Push-off geometry is approximate (covalent-radius bond lengths,
             # ideal angles): polish it with the real force field, then make
             # sure the minimiser did not fold it back into a clash.
             _p("Re-optimising the repaired chain")
             optimizer.optimize(chain, ff=cfg.optimizer.ff, steps=cfg.optimizer.steps,
-                               tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm)
+                               tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm,
+                               cancel=cancel)
             if not is_clean(chain):
-                _geom_ok = ensure_clean_geometry(chain, _p, seed=int(cfg.chain.seed or 7) + 1)
+                _geom_ok = ensure_clean_geometry(chain, _p, seed=int(cfg.chain.seed or 7) + 1,
+                                                 cancel=cancel)
     if not _geom_ok:
         _p("WARNING: chain geometry still has overlaps; force-field typing "
            "from coordinates may fail.")
@@ -552,6 +584,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                 dl_field_dir=dl_lib.parent if dl_lib else None,
                 output_engine=dl_engine,
                 box_ang=tuple(box_shape.bounding_box()),
+                cancel=cancel,
             )
             _p(f"  Exit code       : {dlfield_result.return_code}")
             _p(f"  Output files    : {len(dlfield_result.outputs)}")
@@ -589,6 +622,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                         packmol_path=getattr(cfg.box, "packmol_path", "") or None,
                         seed=int(getattr(cfg.box, "packmol_seed", -1)),
                         tolerance=float(getattr(cfg.box, "packmol_tolerance", 2.0)),
+                        cancel=cancel,
                     )
                     _p(f"[replicator] Wrote {packed_data}")
                     dlfield_result.outputs = sorted(
@@ -755,7 +789,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
         _stage(6, "Running moltemplate.sh")
         if want_lammps:
             if find_moltemplate():
-                data_file = run_moltemplate(system_lt, work_dir=out_dir)
+                data_file = run_moltemplate(system_lt, work_dir=out_dir, cancel=cancel)
                 if _pack_after_mt and data_file and Path(data_file).exists():
                     _stage(7, f"Packing {_n_chains_mt} chains into the box")
                     _p(f"[replicator] Packing {_n_chains_mt} chains into box "
@@ -769,6 +803,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
                         packmol_path=getattr(cfg.box, "packmol_path", "") or None,
                         seed=int(getattr(cfg.box, "packmol_seed", -1)),
                         tolerance=float(getattr(cfg.box, "packmol_tolerance", 2.0)),
+                        cancel=cancel,
                     )
                     _p(f"[replicator] Wrote {packed_data} "
                        f"(run.in reads this file; system.data is the single chain)")
@@ -810,7 +845,7 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None) 
         elif _in.exists():
             _p("[styles] lammps.in already uses plain styles — nothing to convert")
 
-    _p(f"[stage done/{N_STAGES}] Finished — files in {out_dir}")
+    _p(f"[stage done/{_N_STAGES}] Finished — files in {out_dir}")
 
     # ---- Optional: multi-component blend packing --------------------------
     blend_out = None

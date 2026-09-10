@@ -46,7 +46,8 @@ from ..config import (
 )
 from ..ff_registry import list_ffs
 from ..logging_utils import QtLogHandler, get_logger
-from ..pipeline import run_pipeline
+from ..pipeline import PipelineCancelled, run_pipeline
+from ..cell.packing import CancelToken
 from ..run_progress import parse_stage
 from .builder_tab import BuilderTab
 from .blend_tab import BlendTab
@@ -87,17 +88,22 @@ def _parse_float(text: str, default: float = 0.0) -> float:
 class Worker(QObject):
     finished = pyqtSignal(dict)
     failed = pyqtSignal(str)
+    cancelled = pyqtSignal()
     progress = pyqtSignal(str)
 
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, cancel=None):
         super().__init__()
         self.cfg = cfg
+        self.cancel = cancel
 
     @pyqtSlot()
     def run(self) -> None:
         try:
-            res = run_pipeline(self.cfg, progress=self.progress.emit)
+            res = run_pipeline(self.cfg, progress=self.progress.emit,
+                               cancel=self.cancel)
             self.finished.emit(res)
+        except PipelineCancelled:
+            self.cancelled.emit()
         except Exception as exc:
             self.failed.emit(f"{exc}\n\n{traceback.format_exc()}")
 
@@ -1228,8 +1234,18 @@ class MainWindow(QMainWindow):
         self.run_bar.setTextVisible(True)
         self.run_bar.setFormat("%p%")
         self.run_bar.setFixedHeight(18)
+        self.btn_cancel = QPushButton("■  Cancel")
+        self.btn_cancel.setToolTip("Stop the running build immediately "
+                                   "(kills dl_field / moltemplate / packmol too).")
+        self.btn_cancel.setStyleSheet(
+            "QPushButton { color: #DC2626; border: 1px solid #DC2626; "
+            "border-radius: 6px; padding: 3px 10px; }"
+            "QPushButton:hover { background: #FEE2E2; }")
+        self.btn_cancel.clicked.connect(self._cancel_run)
+        self.btn_cancel.hide()
         st = QHBoxLayout()
         st.addWidget(self.run_bar, 1)
+        st.addWidget(self.btn_cancel)
         st.addWidget(self.run_status, 3)
         v.addLayout(st)
         self._stage_ready = True
@@ -1869,21 +1885,45 @@ class MainWindow(QMainWindow):
         self.run_bar.setValue(0)
         self.run_bar.setStyleSheet("")
         self.run_status.setText("Starting…")
+        self._cancel_token = CancelToken()
+        self.btn_cancel.setEnabled(True)
+        self.btn_cancel.setText("■  Cancel")
+        self.btn_cancel.show()
         self._thread = QThread(self)
-        self._worker = Worker(cfg)
+        self._worker = Worker(cfg, cancel=self._cancel_token)
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.progress.connect(self._append_log)
         self._worker.finished.connect(self._on_finished)
         self._worker.failed.connect(self._on_failed)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.finished.connect(self._thread.quit)
         self._worker.failed.connect(self._thread.quit)
+        self._worker.cancelled.connect(self._thread.quit)
         self._thread.finished.connect(self._on_thread_done)
         self._thread.start()
 
     def _on_thread_done(self) -> None:
         self.btn_run.setEnabled(True)
         self.btn_run.setText("▶  Generate files")
+        self.btn_cancel.hide()
+
+    def _cancel_run(self) -> None:
+        tok = getattr(self, "_cancel_token", None)
+        if tok is None:
+            return
+        tok.cancel()
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setText("Cancelling…")
+        self.run_status.setText("Cancelling — stopping the current step…")
+
+    @pyqtSlot()
+    def _on_cancelled(self) -> None:
+        self.run_status.setText("■ Cancelled — nothing more was written. "
+                                "Change settings or pick another tool.")
+        self.run_bar.setStyleSheet("QProgressBar::chunk{background:#94A3B8;}")
+        self._append_log("PIPELINE CANCELLED by user")
+        self.statusBar().showMessage("Cancelled", 5000)
 
     def _on_stage(self, msg: str) -> bool:
         """Update the Export page bar from a '[stage k/N] label' line."""

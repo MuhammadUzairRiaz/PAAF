@@ -96,7 +96,7 @@ def test_pipeline_moltemplate_route_writes_single_chain_then_packs():
     import paaf.pipeline as pl
     tree = ast.parse(Path(pl.__file__).read_text())
     fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.FunctionDef) and n.name == "run_pipeline")
+              if isinstance(n, ast.FunctionDef) and n.name == "_run_pipeline_body")
     calls = {}
     for node in ast.walk(fn):
         if isinstance(node, ast.Call):
