@@ -91,14 +91,42 @@ def assign(
         if ff.key in ("oplsaa", "oplsaa2008", "loplsaa", "loplsaa2008"):
             _assign_opls_smarts(mol, ff, manual_types)
         else:
-            _assign_openbabel(mol, ff)
+            from .typers.generic import is_supported
+            if is_supported(ff.key):
+                # COMPASS / DREIDING / GAFF / TraPPE-UA / OPLS-UA: environment
+                # classification mapped onto that library's own type names,
+                # so moltemplate finds every type in the bundled .lt.
+                _assign_generic(mol, ff, manual_types)
+            else:
+                _assign_openbabel(mol, ff)
     elif strategy == "dlfield_sf":
-        if dl_lib_dir is None:
-            raise ValueError("dlfield_sf typer requires dl_lib_dir")
-        _assign_from_dlfield(mol, ff, dl_lib_dir)
+        from .typers.generic import is_supported
+        if ff.kind != "dlfield" and is_supported(ff.key):
+            # A Moltemplate-native library (DREIDING, COMPASS-published):
+            # the .lt wants ITS type names (C_3, c4 ...), not DL_FIELD's, and
+            # the environment table gives exactly those.
+            _assign_generic(mol, ff, manual_types)
+        else:
+            if dl_lib_dir is None:
+                raise ValueError("dlfield_sf typer requires dl_lib_dir")
+            _assign_from_dlfield(mol, ff, dl_lib_dir)
     elif strategy == "antechamber":
-        _assign_antechamber(mol, ff)
+        from .typers.generic import is_supported
+        if _which("antechamber") is None and is_supported(ff.key):
+            log.info("antechamber not on PATH; typing %s with PAAF's built-in "
+                     "GAFF environment typer instead.", ff.key)
+            _assign_generic(mol, ff, manual_types)
+        else:
+            _assign_antechamber(mol, ff)
     elif strategy == "manual":
+        from .typers.generic import is_supported, type_generic
+        if is_supported(ff.key) and not all(a.ff_type for a in mol.atoms):
+            # Fill what the user did not assign from the library's own
+            # environment table (heavy atoms only for united-atom FFs).
+            auto = type_generic(mol, ff.key)
+            for a in mol.atoms:
+                if not a.ff_type and a.index in auto:
+                    a.ff_type = auto[a.index]
         if not all(a.ff_type for a in mol.atoms):
             missing = [a.index for a in mol.atoms if not a.ff_type]
             raise ValueError(
@@ -203,6 +231,19 @@ def _assign_opls_smarts(mol: Molecule, ff: ForceField,
             a.ff_type = manual_types[a.index]
         else:
             a.ff_type = types.get(a.index, a.element)
+
+
+def _assign_generic(mol: Molecule, ff: ForceField,
+                    manual_types: Optional[Dict[int, str]]) -> None:
+    """Type with :mod:`paaf.typers.generic`, keeping manual overrides."""
+    from .typers.generic import type_generic
+    types = type_generic(mol, ff.key)
+    for a in mol.atoms:
+        if manual_types and a.index in manual_types:
+            a.ff_type = manual_types[a.index]
+        else:
+            t = types.get(a.index)
+            a.ff_type = t if t else a.element
 
 
 # ------------------------------------------------------------ OpenBabel typer

@@ -176,11 +176,11 @@ class AtomTypingDialog(QDialog):
         bar.addWidget(self.type_filter, 1); bar.addWidget(self.elem_filter)
         rg.addLayout(bar)
 
-        self.type_table = QTableWidget(0, 5)
+        self.type_table = QTableWidget(0, 7)
         self.type_table.setHorizontalHeaderLabels(
-            ["FF id", "Element", "Key", "Charge", "Description"]
+            ["FF id", "Element", "Key", "Charge", "Mass", "LJ parameters", "Description"]
         )
-        self.type_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.type_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
         self.type_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.type_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.type_table.setMinimumWidth(0)
@@ -331,6 +331,30 @@ class AtomTypingDialog(QDialog):
             return False
         return name.startswith("oplsaa") or name.startswith("loplsaa")
 
+    def _typer(self):
+        """The automatic typer for the chosen force field, or None.
+
+        OPLS-AA family -> the dedicated SMARTS typer (numeric OPLS ids).
+        Every other bundled Moltemplate library (COMPASS, DREIDING, GAFF,
+        GAFF2, TraPPE-UA, OPLS-UA) -> :mod:`paaf.typers.generic`, which
+        classifies the chemical environment once and maps it onto that
+        library's own type names.
+        """
+        if self._is_opls_family():
+            try:
+                from ..typers.oplsaa import type_oplsaa
+                return type_oplsaa
+            except Exception:
+                pass
+        try:
+            from ..typers.generic import is_supported, type_generic
+        except Exception:
+            return None
+        key = self._ff_key or ""
+        if is_supported(key):
+            return lambda mol, _k=key: type_generic(mol, _k)
+        return None
+
     def _load_atoms(self):
         """Load the atoms from the monomer files into the left table.
 
@@ -362,15 +386,8 @@ class AtomTypingDialog(QDialog):
         # used only for the OPLS family. For every other Moltemplate FF we fall
         # back to a generic environment-based ranking of that FF's OWN atom-type
         # library (so the suggested id always exists in the imported .lt).
-        use_opls = self._is_opls_family()
         smarts_guess_by_index: Dict[int, str] = {}
-        _typer_ok = False
-        if use_opls:
-            try:
-                from ..typers.oplsaa import type_oplsaa
-                _typer_ok = True
-            except Exception:
-                _typer_ok = False
+        _typer_ok = self._typer() is not None
 
         rows = []
         for path in self._monomer_files:
@@ -578,14 +595,14 @@ class AtomTypingDialog(QDialog):
         from ..typing_context import role_key
 
         guesses: Dict[int, str] = {}
-        if self._is_opls_family():
+        typer = self._typer()
+        if typer is not None:
             try:
-                from ..typers.oplsaa import type_oplsaa
                 # Typed on the trimer, so each unit's suggestion is already
                 # right for its position: the head's link carbon still has its
                 # cap and reads CH3, the middle's does not and reads CH2. The
                 # distinction that had to be explained is simply true here.
-                guesses = type_oplsaa(ctx.molecule)
+                guesses = typer(ctx.molecule)
             except Exception:
                 guesses = {}
 
@@ -730,7 +747,11 @@ class AtomTypingDialog(QDialog):
             q = QTableWidgetItem(f"{t.charge:+.4f}")
             q.setData(Qt.EditRole, t.charge)
             self.type_table.setItem(r, 3, q)
-            self.type_table.setItem(r, 4, QTableWidgetItem(t.description))
+            mass_item = QTableWidgetItem(f"{t.mass:.3f}" if t.mass else "")
+            mass_item.setData(Qt.EditRole, float(t.mass or 0.0))
+            self.type_table.setItem(r, 4, mass_item)
+            self.type_table.setItem(r, 5, QTableWidgetItem(t.params))
+            self.type_table.setItem(r, 6, QTableWidgetItem(t.description))
         self.type_table.setSortingEnabled(True)
         # Sort ascending by FF id so users see @atom:1, 2, 3, ... first
         # (common polymer types 135/140/145 land near the middle of a long
@@ -747,7 +768,8 @@ class AtomTypingDialog(QDialog):
         if q:
             rows = [t for t in rows
                     if q in t.ff_id.lower() or q in t.element.lower()
-                    or q in t.key.lower() or q in t.description.lower()]
+                    or q in t.key.lower() or q in t.description.lower()
+                    or q in t.params.lower()]
         self._render_types(rows)
 
     # ============================================================ actions
@@ -819,7 +841,9 @@ class AtomTypingDialog(QDialog):
         Falls back to typing the bare monomer if a trimer cannot be built —
         a worse answer, but better than none, and the caller logs it.
         """
-        from ..typers.oplsaa import type_oplsaa
+        type_oplsaa = self._typer()
+        if type_oplsaa is None:
+            return {}
 
         # The cached context, not a fresh one: the table rows and the 3D view
         # both index into this exact molecule, and handing them a second,
@@ -1042,14 +1066,8 @@ class AtomTypingDialog(QDialog):
         except Exception as exc:
             self._alert(f"Typer unavailable: {exc}"); return
 
-        use_opls = self._is_opls_family()
-        type_oplsaa = None
-        if use_opls:
-            try:
-                from ..typers.oplsaa import type_oplsaa as _to
-                type_oplsaa = _to
-            except Exception:
-                use_opls = False
+        type_oplsaa = self._typer()
+        use_opls = type_oplsaa is not None
 
         for path in self._monomer_files:
             try:
