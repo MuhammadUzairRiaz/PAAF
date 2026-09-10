@@ -68,9 +68,9 @@ class BoxCfg:
     """
     n_chains: int = 1
     shape: str = "cubic"                  # cubic | orthorhombic | triclinic
-    a: float = 50.0
-    b: float = 50.0
-    c: float = 50.0
+    a: float = 250.0
+    b: float = 250.0
+    c: float = 250.0
     alpha: float = 90.0
     beta: float = 90.0
     gamma: float = 90.0
@@ -100,7 +100,7 @@ class BoxCfg:
 
     # Deprecated but kept for backwards compat with old configs.
     # Old code path stored a 3-tuple in `size`.
-    size: List[float] = field(default_factory=lambda: [50.0, 50.0, 50.0])
+    size: List[float] = field(default_factory=lambda: [250.0, 250.0, 250.0])
 
 
 @dataclass

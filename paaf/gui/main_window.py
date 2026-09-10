@@ -1008,10 +1008,10 @@ class MainWindow(QMainWindow):
         def _edge():
             w = QDoubleSpinBox()
             w.setRange(1.0, 10000.0)
-            w.setDecimals(1)              # 50.0 Å reads better than 50.000 Å
+            w.setDecimals(1)              # 250.0 Å reads better than 250.000 Å
             w.setSingleStep(1.0)
             w.setGroupSeparatorShown(False)   # never insert thousand separators
-            w.setValue(50.0)
+            w.setValue(250.0)
             w.setSuffix(" Å"); return w
         self.box_a = _edge()
         self.box_b = _edge()
@@ -1753,9 +1753,9 @@ class MainWindow(QMainWindow):
                 self.opt_alg.setCurrentIndex(i); break
         self.n_chains.setValue(cfg.box.n_chains)
         self.box_shape.setCurrentText(getattr(cfg.box, "shape", "cubic"))
-        self.box_a.setValue(getattr(cfg.box, "a", cfg.box.size[0] if cfg.box.size else 50.0))
-        self.box_b.setValue(getattr(cfg.box, "b", cfg.box.size[1] if len(cfg.box.size) > 1 else 50.0))
-        self.box_c.setValue(getattr(cfg.box, "c", cfg.box.size[2] if len(cfg.box.size) > 2 else 50.0))
+        self.box_a.setValue(getattr(cfg.box, "a", cfg.box.size[0] if cfg.box.size else 250.0))
+        self.box_b.setValue(getattr(cfg.box, "b", cfg.box.size[1] if len(cfg.box.size) > 1 else 250.0))
+        self.box_c.setValue(getattr(cfg.box, "c", cfg.box.size[2] if len(cfg.box.size) > 2 else 250.0))
         self.box_alpha.setValue(getattr(cfg.box, "alpha", 90.0))
         self.box_beta.setValue(getattr(cfg.box, "beta", 90.0))
         self.box_gamma.setValue(getattr(cfg.box, "gamma", 90.0))
