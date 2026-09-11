@@ -260,7 +260,11 @@ def write_bridge_lt(out_dir: Path, primary_ff, ua_ff, beads_used: Dict[str, Tupl
     lines.append('  write_once("Data Masses") {')
     for ff_i, lt_i, beads_i in sources:
         for tid, (n_h, mass, desc) in sorted(beads_i.items()):
-            lines.append(f"    @atom:{bridge_type_name(tid)} {mass:.4f}   # {ff_i.key} {tid}: {desc}")
+            # No ':' in the comment: moltemplate copies it into the data
+            # file's Masses line and cleanup_moltemplate.sh / ltemplify.py
+            # read that comment back as a type name ("at most one ':'").
+            clean = re.sub(r"[:\s]+", " ", f"{ff_i.key} {tid} {desc}").strip()
+            lines.append(f"    @atom:{bridge_type_name(tid)} {mass:.4f}   # {bridge_type_name(tid)} {clean}")
     lines += ["  }", '  write_once("In Charges") {']
     for ff_i, lt_i, beads_i in sources:
         for tid in sorted(beads_i):

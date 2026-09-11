@@ -106,6 +106,10 @@ def test_bridge_reopens_aa_namespace(tmp_path):
     assert 'import "oplsaa2024.lt"' in txt and txt.count("OPLSAA {") == 1
     assert "@atom:UA_CH2 14.1707" in txt and "@atom:UA_CH3 15.2507" in txt
     assert "replace{ @atom:UA_CH2 @atom:UA_CH2_bCT_aCT_dCT_iCT }" in txt
+    # comments must not contain ':' (cleanup_moltemplate.sh reads them as type names)
+    for line in txt.splitlines():
+        if "@atom:UA_" in line and "#" in line:
+            assert ":" not in line.split("#", 1)[1], line
     assert re.search(r"pair_coeff @atom:UA_CH2 @atom:UA_CH2\s+0\.091412 3\.9500", txt)
     assert "set type @atom:UA_CH3 charge 0.0" in txt
     assert {a.ff_type for a in res.chain.atoms if a.element == "C"} >= {"UA_CH3", "UA_CH2"}
