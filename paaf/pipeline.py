@@ -814,7 +814,25 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
         _stage(6, "Running moltemplate.sh")
         if want_lammps:
             if find_moltemplate():
-                data_file = run_moltemplate(system_lt, work_dir=out_dir, cancel=cancel)
+                try:
+                    data_file = run_moltemplate(system_lt, work_dir=out_dir, cancel=cancel)
+                except RuntimeError as _mt_err:
+                    _msg = str(_mt_err)
+                    _missing = ("No bond types" in _msg or "No angle types" in _msg
+                                or "No dihedral types" in _msg or "No improper types" in _msg)
+                    if not (_hyb is not None and _hyb.native_beads and _missing):
+                        raise
+                    from .ua_hybrid import bridge_native_beads
+                    bridge_native_beads(_hyb, ff, out_dir, _p)
+                    chain = _hyb.chain
+                    chain_lt = lt_writer.write_chain_lt(
+                        chain, out_dir, ff, name=cfg.project_name,
+                        inherit=_hyb.inherit, lt_include=_hyb.lt_include,
+                        bond_type=_hyb.bond_type)
+                    system_lt = lt_writer.write_system_lt(
+                        out_dir, chain_lt, n_chains=1,
+                        box=list(box_shape.bounding_box()), name="system", ff=ff)
+                    data_file = run_moltemplate(system_lt, work_dir=out_dir, cancel=cancel)
                 if _hyb is not None and _hyb.bead_masses:
                     from .ua_hybrid import patch_data_masses
                     _nm = patch_data_masses(Path(data_file), _hyb.bead_masses)

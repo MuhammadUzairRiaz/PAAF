@@ -79,23 +79,29 @@ def _typed(primary, ua_key, ua_atoms):
     return mol
 
 
-def test_same_family_hybrid_uses_bridge_with_own_charges(tmp_path):
+def test_same_family_hybrid_keeps_native_opls_ids(tmp_path):
+    """OPLS-UA beads inside OPLS-AA keep their native ids/names (68, 71 …);
+    only the mass is patched. No bridge file for them."""
     mol = _typed("oplsaa", "oplsua_2024", [0, 1, 2, 3])
     res = apply_hybrid(mol, get_ff("oplsaa"), get_ff("oplsua_2024"), tmp_path)
-    assert res.removed_h == 9 and res.n_beads == 4 and res.inherit == "OPLSAA"
-    assert {a.ff_type for a in res.chain.atoms if a.element == "C"} == {"UA_68", "UA_71", "135", "136"}
-    assert res.bead_masses == {"UA_68": pytest.approx(15.035), "UA_71": pytest.approx(14.027)}
+    assert res.removed_h == 9 and res.n_beads == 4 and res.inherit is None
+    assert {a.ff_type for a in res.chain.atoms if a.element == "C"} == {"68", "71", "135", "136"}
+    assert res.bead_masses == {"68": pytest.approx(15.035), "71": pytest.approx(14.027)}
+    assert set(res.native_beads) == {"68", "71"}
+    assert not (tmp_path / "paaf_ua_bridge.lt").exists()
+
+
+def test_native_beads_fall_back_to_bridge_on_demand(tmp_path):
+    from paaf.ua_hybrid import bridge_native_beads
+    mol = _typed("oplsaa", "oplsua_2024", [0, 1])
+    res = apply_hybrid(mol, get_ff("oplsaa"), get_ff("oplsua_2024"), tmp_path)
+    assert bridge_native_beads(res, get_ff("oplsaa"), tmp_path)
+    assert {a.ff_type for a in res.chain.atoms if a.element == "C"} >= {"UA_68", "UA_71"}
+    assert res.lt_include == "paaf_ua_bridge.lt" and res.native_beads == {}
     txt = (tmp_path / "paaf_ua_bridge.lt").read_text()
     assert "replace{ @atom:UA_71 @atom:UA_71_bCT_aCT_dCT_iCT }" in txt
     assert "set type @atom:UA_68 charge 0.0000" in txt
-    # sp2 bead borrows the alkene class, ether CH3 keeps its +0.25 charge
-    mol2 = _mol("CC=CCOC"); t = type_generic(mol2, "oplsaa")
-    for a in mol2.atoms: a.ff_type = t.get(a.index)
-    mol2.atoms[1].ff_type = "74"; mol2.atoms[5].ff_type = "UA:109"
-    res2 = apply_hybrid(mol2, get_ff("oplsaa"), get_ff("oplsua_2024"), tmp_path)
-    txt = (tmp_path / "paaf_ua_bridge.lt").read_text()
-    assert "replace{ @atom:UA_74 @atom:UA_74_bCM_aCM_dCM_iCM }" in txt
-    assert "set type @atom:UA_109 charge 0.2500" in txt
+    assert res.bead_masses["UA_68"] == pytest.approx(15.035)
 
 
 def test_bridge_reopens_aa_namespace(tmp_path):
@@ -215,8 +221,8 @@ def test_plain_ua_block_type_from_aa_table_also_absorbs(tmp_path):
     assert implicit_ua_library(get_ff("oplsaa"), mol) == "oplsua_2024"
     res = apply_hybrid(mol, get_ff("oplsaa"), get_ff("oplsua_2024"), tmp_path)
     assert not [a for a in res.chain.atoms if a.element == "H"]
-    assert res.bead_masses["UA_74"] == pytest.approx(13.019)
-    assert {a.ff_type for a in res.chain.atoms} == {"UA_68", "UA_71", "UA_74"}
+    assert res.bead_masses["74"] == pytest.approx(13.019)
+    assert {a.ff_type for a in res.chain.atoms} == {"68", "71", "74"}     # native ids
 
 
 def test_plain_ua_block_types_absorb_with_trappe_secondary_and_without_any(tmp_path):
@@ -228,9 +234,9 @@ def test_plain_ua_block_types_absorb_with_trappe_secondary_and_without_any(tmp_p
     mol.atoms[2].ff_type = "71"                         # plain OPLS-UA CH2 from AA table
     res = apply_hybrid(mol, get_ff("oplsaa"), get_ff("trappe_ua"), tmp_path)
     assert res.removed_h == 3 + 2 + 2
-    assert res.bead_masses["UA_71"] == pytest.approx(14.027)
-    assert res.bead_masses["UA_CH2"] == pytest.approx(14.171, abs=1e-3)
+    assert res.bead_masses["71"] == pytest.approx(14.027)         # native OPLS-UA id
+    assert res.bead_masses["UA_CH2"] == pytest.approx(14.171, abs=1e-3)   # TraPPE via bridge
     txt = (tmp_path / "paaf_ua_bridge.lt").read_text()
-    assert "@atom:UA_CH2 " in txt and "@atom:UA_71 " in txt      # both sources in one file
+    assert "@atom:UA_CH2 " in txt and "UA_71" not in txt
     mw = Path("paaf/gui/main_window.py").read_text()
     assert "AdvancedTypingDialog as AtomTypingDialog" in mw

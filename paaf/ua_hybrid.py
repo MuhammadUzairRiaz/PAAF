@@ -301,6 +301,7 @@ class HybridResult:
     lt_include: Optional[str] = None    # file the chain .lt should import
     bond_type: Optional[str] = None     # explicit bond type (TraPPE has no Bonds By Type)
     bead_masses: Dict[str, float] = field(default_factory=dict)   # final type id -> mass
+    native_beads: Dict[str, Tuple[int, float, str]] = field(default_factory=dict)
     removed_h: int = 0
     n_beads: int = 0
     remap: Dict[int, int] = field(default_factory=dict)
@@ -365,37 +366,41 @@ def apply_hybrid(chain: Molecule, primary_ff, ua_ff, out_dir: Path,
                 f"type. Type every carbon as a CHn bead, or mix with an "
                 f"all-atom force field (Advanced typing).")
     else:
-        # Every bead — from the secondary library (UA:) or the all-atom
-        # library's own UA block — is declared through the bridge: its own
-        # LJ/charge/mass, bonded classes of the matching all-atom carbon.
-        # Using the UA block's native bonded classes instead fails the
-        # moment a bead sits next to Si, S or another atom Jorgensen never
-        # paired with a united-atom carbon; the all-atom classes cover all.
+        # Beads that already exist in the all-atom library (the OPLS-UA block
+        # inside OPLS-AA 2024) keep their NATIVE ids — 68, 71, 74 … — with
+        # the library's own names, charges, LJ and bonded classes; only the
+        # mass is patched in the data file (the library lists 12.011).
+        # Beads from a foreign library (TraPPE) cannot be native and go
+        # through the bridge. If a native bead later turns out to lack a
+        # bonded term (e.g. C2 next to Si), the pipeline retries with
+        # :func:`bridge_native_beads`.
         used_sec: Dict[str, Tuple[int, float, str]] = {}
-        used_own: Dict[str, Tuple[int, float, str]] = {}
+        native_ok = ua_ff.key == "oplsua_2024" and bool(own_beads)
         for a in new.atoms:
             if a.ff_type and a.ff_type.startswith(UA_PREFIX):
                 tid = a.ff_type[len(UA_PREFIX):]
-                used_sec[tid] = beads[tid]
-                a.ff_type = bridge_type_name(tid)
-                res.bead_masses[a.ff_type] = beads[tid][1]
+                if native_ok and tid in own_beads:
+                    a.ff_type = tid
+                    res.bead_masses[tid] = own_beads[tid][1]
+                    res.native_beads[tid] = own_beads[tid]
+                else:
+                    used_sec[tid] = beads[tid]
+                    a.ff_type = bridge_type_name(tid)
+                    res.bead_masses[a.ff_type] = beads[tid][1]
             elif a.ff_type in own_beads and a.element == "C":
-                tid = a.ff_type
-                used_own[tid] = own_beads[tid]
-                a.ff_type = bridge_type_name(tid)
-                res.bead_masses[a.ff_type] = own_beads[tid][1]
-        sp3 = FF_MAPS.get(primary_ff.key, ({}, {}))[0].get("alkane_CH2", "")
-        own_ff = get_ff("oplsua_2024")
-        if ua_ff.key == own_ff.key:
-            write_bridge_lt(Path(out_dir), primary_ff, ua_ff, {**used_sec, **used_own}, sp3)
-        else:
-            write_bridge_lt(Path(out_dir), primary_ff, ua_ff, used_sec, sp3,
-                            extra_sources=[(own_ff, used_own)])
-        res.inherit = primary_ff.inherit
-        res.lt_include = BRIDGE_FILE
-        say(f"Bridge library {BRIDGE_FILE}: {len(used_sec) + len(used_own)} united-atom "
-            f"bead type(s) declared inside {primary_ff.display_name} (LJ/charge/mass "
-            f"from the UA library, bonded terms from the all-atom CT/CM/CA classes).")
+                res.bead_masses[a.ff_type] = own_beads[a.ff_type][1]
+                res.native_beads[a.ff_type] = own_beads[a.ff_type]
+        if used_sec:
+            sp3 = FF_MAPS.get(primary_ff.key, ({}, {}))[0].get("alkane_CH2", "")
+            write_bridge_lt(Path(out_dir), primary_ff, ua_ff, used_sec, sp3)
+            res.inherit = primary_ff.inherit
+            res.lt_include = BRIDGE_FILE
+            say(f"Bridge library {BRIDGE_FILE}: {len(used_sec)} {ua_ff.display_name} "
+                f"bead type(s) declared inside {primary_ff.display_name} (LJ/charge/"
+                f"mass from the UA library, bonded terms from the CT/CM/CA classes).")
+        if res.native_beads:
+            say(f"Native OPLS united-atom types kept as-is: "
+                f"{', '.join(sorted(res.native_beads))} (masses patched in the data file).")
     say(f"United-atom absorption: {res.n_beads} bead(s), {res.removed_h} "
         f"hydrogen(s) removed; chain now {len(new.atoms)} atoms.")
     return res
@@ -413,6 +418,47 @@ def primary_own_beads(primary_ff) -> Dict[str, Tuple[int, float, str]]:
         return bead_table(get_ff("oplsua_2024").bundled_path())
     except Exception:
         return {}
+
+
+def bridge_native_beads(res: "HybridResult", primary_ff, out_dir: Path, say=None) -> bool:
+    """Fallback: re-express native OPLS-UA beads through the bridge library.
+
+    Used when moltemplate reports a missing bonded term for a native bead
+    (Jorgensen's UA classes have no entry next to Si, for instance). The
+    beads keep their LJ, charge and mass; only the bonded class changes to
+    the all-atom CT/CM/CA one. Returns False if there is nothing to do.
+    """
+    say = say or (lambda s: None)
+    if not res.native_beads:
+        return False
+    from .ff_registry import get_ff
+    from .typers.generic import FF_MAPS
+    ua_ff = get_ff("oplsua_2024")
+    for a in res.chain.atoms:
+        if a.ff_type in res.native_beads:
+            res.bead_masses.pop(a.ff_type, None)
+            a.ff_type = bridge_type_name(a.ff_type)
+    used = dict(res.native_beads)
+    for tid, spec in used.items():
+        res.bead_masses[bridge_type_name(tid)] = spec[1]
+    sp3 = FF_MAPS.get(primary_ff.key, ({}, {}))[0].get("alkane_CH2", "")
+    # merge with an existing bridge (TraPPE beads) if one was written
+    existing = Path(out_dir) / BRIDGE_FILE
+    extra = []
+    if existing.exists() and res.lt_include == BRIDGE_FILE:
+        tr = get_ff("trappe_ua")
+        tr_beads = {tid: spec for tid, spec in bead_table(tr.bundled_path()).items()
+                    if f"@atom:{bridge_type_name(tid)} " in existing.read_text()}
+        if tr_beads:
+            extra = [(tr, tr_beads)]
+    write_bridge_lt(Path(out_dir), primary_ff, ua_ff, used, sp3, extra_sources=extra)
+    res.inherit = primary_ff.inherit
+    res.lt_include = BRIDGE_FILE
+    res.native_beads = {}
+    say(f"Native united-atom classes lacked a bonded term; re-declared "
+        f"{', '.join(sorted(used))} through {BRIDGE_FILE} (same LJ/charge/mass, "
+        f"bonded terms from the all-atom CT/CM/CA classes) and retrying.")
+    return True
 
 
 def implicit_ua_library(primary_ff, chain: Molecule) -> Optional[str]:

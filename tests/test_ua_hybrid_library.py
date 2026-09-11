@@ -111,11 +111,10 @@ def test_library_polymer_absorbs_exactly_its_bead_hydrogens(rec, tmp_path):
         assert a.ff_type and not a.ff_type.startswith(UA_PREFIX), a
         el = elements.get(a.ff_type)
         assert el in (None, a.element), (rec.name, a.index, a.ff_type, el, a.element)
-        if a.ff_type.startswith("UA_"):
-            assert a.element == "C"
+        assert not a.ff_type.startswith("UA_")          # native OPLS ids kept
     for tid, mass in res.bead_masses.items():
-        assert mass == pytest.approx(UA_BEADS[tid.replace("UA_", "")][1])
-    assert (tmp_path / "paaf_ua_bridge.lt").exists()
+        assert mass == pytest.approx(UA_BEADS[tid][1])
+    assert not (tmp_path / "paaf_ua_bridge.lt").exists()
     # bonds only between surviving atoms, connectivity intact
     n = len(res.chain.atoms)
     assert all(0 <= i < n and 0 <= j < n for i, j, _ in res.chain.bonds)
@@ -152,12 +151,22 @@ def test_moltemplate_resolves_mixed_chain(name, tmp_path, monkeypatch):
     res = apply_hybrid(chain, get_ff("oplsaa"), get_ff("oplsua_2024"), tmp_path)
     for f in LIB.glob("oplsaa2024.lt"):
         shutil.copy(f, tmp_path / f.name)
-    assert res.lt_include == "paaf_ua_bridge.lt"
+    assert res.lt_include is None                      # native ids, no bridge needed
     lt = lt_writer.write_chain_lt(res.chain, tmp_path, get_ff("oplsaa"), name="poly",
                                   inherit=res.inherit, lt_include=res.lt_include,
                                   bond_type=res.bond_type)
     sysl = lt_writer.write_system_lt(tmp_path, lt, n_chains=1, box=[60, 60, 60])
-    data = run_moltemplate(sysl, work_dir=tmp_path)
+    try:
+        data = run_moltemplate(sysl, work_dir=tmp_path)
+    except RuntimeError as exc:
+        # the pipeline's fallback: a native bead lacking a bonded term
+        assert "No bond types" in str(exc) or "No angle types" in str(exc) or "No dihedral types" in str(exc)
+        from paaf.ua_hybrid import bridge_native_beads
+        assert bridge_native_beads(res, get_ff("oplsaa"), tmp_path)
+        lt = lt_writer.write_chain_lt(res.chain, tmp_path, get_ff("oplsaa"), name="poly",
+                                      inherit=res.inherit, lt_include=res.lt_include)
+        sysl = lt_writer.write_system_lt(tmp_path, lt, n_chains=1, box=[60, 60, 60])
+        data = run_moltemplate(sysl, work_dir=tmp_path)
     patch_data_masses(data, res.bead_masses)
     txt = data.read_text()
     g = lambda k: int(re.search(rf"(\d+)\s+{k}", txt).group(1))
