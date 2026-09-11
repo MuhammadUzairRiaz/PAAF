@@ -57,6 +57,13 @@ class AdvancedTypingDialog(AtomTypingDialog):
         b = QPushButton("Load its bead types")
         b.clicked.connect(self._load_ua_library)
         h.addWidget(b)
+        h.addWidget(QLabel("Show types from:"))
+        self.lib_filter = QComboBox()
+        for label, key in (("both libraries", "all"), ("all-atom only", "aa"),
+                           ("united-atom only (UA:)", "ua")):
+            self.lib_filter.addItem(label, userData=key)
+        self.lib_filter.currentIndexChanged.connect(self._apply_type_filter)
+        h.addWidget(self.lib_filter)
         self.ua_note = QLabel("")
         self.ua_note.setWordWrap(True)
         self.ua_note.setStyleSheet("color:#64748B;")
@@ -64,6 +71,9 @@ class AdvancedTypingDialog(AtomTypingDialog):
         lay = self.layout()
         lay.insertWidget(1, gb)
         lay.insertWidget(2, self.ua_note)
+
+    def _library_filter(self) -> str:
+        return self.lib_filter.currentData() if hasattr(self, "lib_filter") else "all"
 
     def ua_key(self) -> Optional[str]:
         """The secondary library actually used (None if no UA type assigned)."""

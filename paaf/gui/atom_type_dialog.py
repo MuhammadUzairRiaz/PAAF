@@ -167,13 +167,25 @@ class AtomTypingDialog(QDialog):
         gb_ff = QGroupBox("Force-field atom types")
         rg = QVBoxLayout(gb_ff)
         bar = QHBoxLayout()
+        self.search_field = QComboBox()
+        for label, key in (("Search: all fields", "all"), ("FF id", "id"),
+                           ("Element", "element"), ("Key", "key"),
+                           ("Charge", "charge"), ("Mass", "mass"),
+                           ("LJ parameters", "params"), ("Description", "desc")):
+            self.search_field.addItem(label, userData=key)
+        self.search_field.setToolTip(
+            "Which column the text box searches. 'FF id' matches the id "
+            "exactly first (68 finds 68 and UA:68, not 1068), then ids that "
+            "start with the text. Mass/Charge accept a number (±0.05).")
+        self.search_field.currentIndexChanged.connect(self._apply_type_filter)
         self.type_filter = QLineEdit()
-        self.type_filter.setPlaceholderText("Filter by id / element / key / description…")
+        self.type_filter.setPlaceholderText("Type to filter… (e.g. 68, CT, CH2, 14.03)")
         self.type_filter.textChanged.connect(self._apply_type_filter)
         self.elem_filter = QComboBox()
         self.elem_filter.addItem("all elements")
         self.elem_filter.currentTextChanged.connect(self._apply_type_filter)
-        bar.addWidget(self.type_filter, 1); bar.addWidget(self.elem_filter)
+        bar.addWidget(self.search_field); bar.addWidget(self.type_filter, 1)
+        bar.addWidget(self.elem_filter)
         rg.addLayout(bar)
 
         self.type_table = QTableWidget(0, 7)
@@ -732,7 +744,7 @@ class AtomTypingDialog(QDialog):
         self.elem_filter.blockSignals(False)
         self._render_types(types)
 
-    def _render_types(self, types):
+    def _render_types(self, types, keep_order: bool = False):
         self.type_table.setSortingEnabled(False); self.type_table.setRowCount(0)
         for t in types:
             r = self.type_table.rowCount(); self.type_table.insertRow(r)
@@ -752,25 +764,32 @@ class AtomTypingDialog(QDialog):
             self.type_table.setItem(r, 4, mass_item)
             self.type_table.setItem(r, 5, QTableWidgetItem(t.params))
             self.type_table.setItem(r, 6, QTableWidgetItem(t.description))
-        self.type_table.setSortingEnabled(True)
-        # Sort ascending by FF id so users see @atom:1, 2, 3, ... first
-        # (common polymer types 135/140/145 land near the middle of a long
-        # list, not buried under the water-model 999x codes).
-        self.type_table.sortByColumn(0, Qt.AscendingOrder)
+        if keep_order:
+            # Search results: best match first, as the search ranked them.
+            self.type_table.setSortingEnabled(False)
+        else:
+            self.type_table.setSortingEnabled(True)
+            # Sort ascending by FF id so users see @atom:1, 2, 3, ... first
+            # (common polymer types 135/140/145 land near the middle of a long
+            # list, not buried under the water-model 999x codes).
+            self.type_table.sortByColumn(0, Qt.AscendingOrder)
         self.type_table.resizeColumnsToContents()
 
     def _apply_type_filter(self):
-        q = self.type_filter.text().strip().lower()
+        from ..type_search import filter_types
+        q = self.type_filter.text().strip()
         elem = self.elem_filter.currentText()
+        field = self.search_field.currentData() if hasattr(self, "search_field") else "all"
         rows = self._ff_types
         if elem != "all elements":
             rows = [t for t in rows if t.element == elem]
-        if q:
-            rows = [t for t in rows
-                    if q in t.ff_id.lower() or q in t.element.lower()
-                    or q in t.key.lower() or q in t.description.lower()
-                    or q in t.params.lower()]
-        self._render_types(rows)
+        rows = filter_types(rows, q, field or "all",
+                            library=getattr(self, "_library_filter", lambda: "all")())
+        self._render_types(rows, keep_order=bool(q))
+        if q and rows:
+            # Best match is listed first: select it so "Assign" (or
+            # quick-assign) uses it straight away.
+            self.type_table.selectRow(0)
 
     # ============================================================ actions
     def _selected_atom_indices(self) -> List[int]:
