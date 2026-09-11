@@ -181,3 +181,25 @@ def test_gui_wiring_present():
     pl = Path("paaf/pipeline.py").read_text()
     assert "apply_hybrid(chain, ff, _ua_ff, out_dir, _p)" in pl
     assert "patch_data_masses(Path(data_file), _hyb.bead_masses)" in pl
+
+
+def test_plain_ua_block_type_from_aa_table_also_absorbs(tmp_path):
+    """User's polybutadiene case: head atom typed '74' (no UA: tag) kept its H."""
+    from paaf.ua_hybrid import implicit_ua_library
+    mol = _mol("CC=CCCC=CC", "pb")
+    t = type_generic(mol, "oplsaa")
+    for a in mol.atoms:
+        a.ff_type = t.get(a.index)
+    # every carbon a UA bead; some tagged, some picked straight from the AA table
+    for a in mol.atoms:
+        if a.element != "C":
+            continue
+        nh = sum(1 for j in mol.neighbors(a.index) if mol.atoms[j].element == "H")
+        sp2 = any(o == 2.0 for i, j, o in mol.bonds if a.index in (i, j))
+        tid = {3: "68", 2: "71"}[nh] if not sp2 else "74"
+        a.ff_type = ("UA:" + tid) if a.index % 2 else tid
+    assert implicit_ua_library(get_ff("oplsaa"), mol) == "oplsua_2024"
+    res = apply_hybrid(mol, get_ff("oplsaa"), get_ff("oplsua_2024"), tmp_path)
+    assert not [a for a in res.chain.atoms if a.element == "H"]
+    assert res.bead_masses["74"] == pytest.approx(13.019)
+    assert {a.ff_type for a in res.chain.atoms} == {"68", "71", "74"}

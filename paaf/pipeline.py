@@ -279,6 +279,13 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
     # Advanced typing UA/AA mix). New chain, fewer atoms, bead masses noted.
     _hyb = None
     _ua_key = getattr(cfg.force_field, "ua_secondary_key", None)
+    if ff.kind == "moltemplate_native" and not ff.united_atom and not _ua_key:
+        # UA-block types picked straight from the OPLS-AA table count too.
+        from .ua_hybrid import implicit_ua_library
+        _ua_key = implicit_ua_library(ff, chain)
+        if _ua_key:
+            _p(f"United-atom bead types found on the chain — absorbing their "
+               f"hydrogens ({get_ff(_ua_key).display_name}).")
     if ff.kind == "moltemplate_native" and (ff.united_atom or _ua_key):
         from .ua_hybrid import apply_hybrid
         _ua_ff = ff if ff.united_atom else get_ff(_ua_key)

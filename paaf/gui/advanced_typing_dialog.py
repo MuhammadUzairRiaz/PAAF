@@ -77,7 +77,7 @@ class AdvancedTypingDialog(AtomTypingDialog):
 
     def ua_key(self) -> Optional[str]:
         """The secondary library actually used (None if no UA type assigned)."""
-        if any(t.startswith(UA_PREFIX) for t in self._types_by_atom.values()):
+        if any(self._bead_spec(t) for t in self._types_by_atom.values()):
             return self._ua_key
         return None
 
@@ -136,13 +136,26 @@ class AdvancedTypingDialog(AtomTypingDialog):
                     return e["key"]
         return None
 
+    def _bead_spec(self, tid: str):
+        """(n_H, mass, desc) if ``tid`` is a united-atom carbon bead.
+
+        ``UA:71`` always; plain ``71`` too when the UA library is the OPLS-UA
+        block that lives inside OPLS-AA — picking it from the all-atom table
+        is the same united-atom choice.
+        """
+        if not tid:
+            return None
+        if tid.startswith(UA_PREFIX):
+            return self._ua_beads.get(tid[len(UA_PREFIX):])
+        if self._ua_key == "oplsua_2024" and self._is_opls_family():
+            return self._ua_beads.get(tid)
+        return None
+
     def _absorbed_h_keys(self) -> Dict[int, int]:
         """``{H row key: bead row key}`` for every hydrogen a UA bead absorbs."""
         out: Dict[int, int] = {}
         for key, tid in self._types_by_atom.items():
-            if not tid.startswith(UA_PREFIX):
-                continue
-            spec = self._ua_beads.get(tid[len(UA_PREFIX):])
+            spec = self._bead_spec(tid)
             if not spec:
                 continue
             e = self._entry_for_key(key)

@@ -263,8 +263,16 @@ def apply_hybrid(chain: Molecule, primary_ff, ua_ff, out_dir: Path,
     ua_only = ua_ff.key == primary_ff.key
     beads = bead_table(ua_ff.bundled_path())
     types = {a.index: a.ff_type for a in chain.atoms if a.ff_type}
+    same_family = (ua_ff.key == "oplsua_2024" and primary_ff.key in _OPLS_AA_KEYS)
     if ua_only:
         plan = plan_absorption(chain, types, beads, strip_prefix=False)
+    elif same_family:
+        # The UA block (66-134) is part of OPLS-AA itself, so a bead may have
+        # been picked from the all-atom table without the UA: tag. Either
+        # spelling is the same united-atom type and absorbs its hydrogens.
+        plan = plan_absorption(chain, {i: t for i, t in types.items()
+                                       if t.startswith(UA_PREFIX)
+                                       or t in beads}, beads)
     else:
         plan = plan_absorption(chain, {i: t for i, t in types.items()
                                        if t.startswith(UA_PREFIX)}, beads)
@@ -280,7 +288,6 @@ def apply_hybrid(chain: Molecule, primary_ff, ua_ff, out_dir: Path,
     res = HybridResult(chain=new, removed_h=len(plan.remove), n_beads=len(plan.beads),
                        remap=remap)
 
-    same_family = (ua_ff.key == "oplsua_2024" and primary_ff.key in _OPLS_AA_KEYS)
     if ua_only:
         # Types are native to the chosen library.
         for a in new.atoms:
@@ -300,6 +307,7 @@ def apply_hybrid(chain: Molecule, primary_ff, ua_ff, out_dir: Path,
         for a in new.atoms:
             if a.ff_type and a.ff_type.startswith(UA_PREFIX):
                 a.ff_type = a.ff_type[len(UA_PREFIX):]
+            if a.ff_type in beads and a.element == "C":
                 res.bead_masses[a.ff_type] = beads[a.ff_type][1]
         say(f"OPLS-UA beads used inside OPLS-AA 2024 (same library; mixed "
             f"bonded terms such as CT-C2 are Jorgensen's own).")
@@ -321,6 +329,28 @@ def apply_hybrid(chain: Molecule, primary_ff, ua_ff, out_dir: Path,
     say(f"United-atom absorption: {res.n_beads} bead(s), {res.removed_h} "
         f"hydrogen(s) removed; chain now {len(new.atoms)} atoms.")
     return res
+
+
+def implicit_ua_library(primary_ff, chain: Molecule) -> Optional[str]:
+    """The UA library whose beads are already on ``chain`` without a UA: tag.
+
+    OPLS-AA 2024 contains the OPLS-UA block, so a user can pick type 71
+    (CH2 bead) from the all-atom table. That is a united-atom choice all the
+    same: return ``"oplsua_2024"`` so the hydrogens get absorbed.
+    """
+    if primary_ff.key not in _OPLS_AA_KEYS:
+        return None
+    from .ff_registry import get_ff
+    try:
+        beads = bead_table(get_ff("oplsua_2024").bundled_path())
+    except Exception:
+        return None
+    for a in chain.atoms:
+        t = a.ff_type or ""
+        if a.element == "C" and (t in beads or
+                                 (t.startswith(UA_PREFIX) and t[len(UA_PREFIX):] in beads)):
+            return "oplsua_2024"
+    return None
 
 
 def patch_data_masses(data_file: Path, bead_masses: Dict[str, float]) -> int:
