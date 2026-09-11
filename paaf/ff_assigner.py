@@ -88,9 +88,11 @@ def assign(
         # For OPLS-AA / L-OPLS-AA use the dedicated SMARTS-based OPLS typer
         # that produces valid numeric OPLS-AA 2024 type IDs (@atom:135 etc.)
         # that moltemplate.sh actually recognizes when importing oplsaa2024.lt.
-        if ff.key in ("oplsaa", "oplsaa2008", "loplsaa", "loplsaa2008"):
+        if ff.key in ("oplsaa", "loplsaa"):
             _assign_opls_smarts(mol, ff, manual_types)
         else:
+            # oplsaa2008 / loplsaa2008 use a different numbering: the SMARTS
+            # typer would emit 2024 ids that mean other elements there.
             from .typers.generic import is_supported
             if is_supported(ff.key):
                 # COMPASS / DREIDING / GAFF / TraPPE-UA / OPLS-UA: environment

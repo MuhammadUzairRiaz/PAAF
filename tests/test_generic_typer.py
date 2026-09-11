@@ -42,11 +42,14 @@ def _mol(smi: str) -> Molecule:
 def test_every_mapped_id_exists_in_bundled_lt(key):
     table, fallback = FF_MAPS[key]
     ids = {t.ff_id for t in parse_atom_types(str(get_ff(key).bundled_path()))}
+    if key.startswith("lopls"):        # L-OPLS imports the OPLS-AA library it refines
+        base = "oplsaa2008" if "2008" in key else "oplsaa"
+        ids |= {t.ff_id for t in parse_atom_types(str(get_ff(base).bundled_path()))}
     used = set(table.values()) | set(fallback.values())
     assert used <= ids, sorted(used - ids)
 
 
-@pytest.mark.parametrize("key", ["compass_published", "dreiding", "gaff", "gaff2", "oplsaa"])
+@pytest.mark.parametrize("key", ["compass_published", "dreiding", "gaff", "gaff2", "oplsaa", "oplsaa2008"])
 @pytest.mark.parametrize("name", list(POLYMERS))
 def test_all_atom_ffs_type_every_atom_of_common_polymers(key, name):
     mol = _mol(POLYMERS[name])
@@ -62,7 +65,7 @@ def test_all_atom_ffs_type_every_atom_of_common_polymers(key, name):
 
 def test_element_of_type_matches_atom():
     """A suggestion must never put a carbon type on an oxygen etc."""
-    for key in ("compass_published", "dreiding", "gaff"):
+    for key in ("compass_published", "dreiding", "gaff", "oplsaa", "oplsaa2008"):
         info = {x.ff_id: x.element for x in parse_atom_types(str(get_ff(key).bundled_path()))}
         for smi in POLYMERS.values():
             mol = _mol(smi)
@@ -135,3 +138,23 @@ def test_dialog_uses_generic_typer_for_non_opls():
     src = Path("paaf/gui/atom_type_dialog.py").read_text()
     assert "def _typer(self)" in src and "type_generic" in src
     assert src.count("from ..typers.oplsaa import type_oplsaa") == 1   # only inside _typer
+
+
+def test_opls_smarts_rules_and_fallbacks_have_right_element():
+    """Every id the OPLS-AA SMARTS typer can emit belongs to the element it types.
+
+    Amide/amine/thiol/sulfone/halide ids used to be from another numbering
+    (177 -> an ether O for the amide carbon; 739 -> a carbon for the amine N).
+    """
+    import re
+    from paaf.typers import oplsaa
+    info = {t.ff_id: t.element for t in parse_atom_types(str(get_ff("oplsaa").bundled_path()))}
+    sym = {"c": "C", "cl": "Cl", "br": "Br", "si": "Si"}
+    for smarts, tid, desc in oplsaa._RULES:
+        m = re.match(r"\[?(Cl|Br|Si|[A-Za-z])", smarts)
+        el = m.group(1); el = sym.get(el.lower(), el.upper() if len(el) == 1 else el)
+        if el == "H" and smarts.startswith("[H]"):
+            el = "H"
+        assert info.get(tid) == el, (smarts, tid, desc, info.get(tid))
+    for el, tid in oplsaa._ELEMENT_FALLBACK.items():
+        assert info.get(tid) == el, (el, tid, info.get(tid))

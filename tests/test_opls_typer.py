@@ -6,23 +6,28 @@ def test_opls_types_dict_covers_common_polymer_families():
     from paaf.typers.oplsaa import OPLS_TYPES
     # Alkane, alkene, aromatic, alcohol, ester carbonyl, ether, nitrile,
     # amide, sulfone, halogen — every core polymer family should map.
+    # (ids verified against oplsaa2024.lt: amide 235/236/238, sulfone 493/494,
+    #  amines 900-902; the older 177/473/739 numbers belonged to other atoms)
     for tid in ("135", "136", "140", "141", "145", "146", "154", "155",
-                "180", "210", "211", "212", "177", "178", "473", "474",
-                "263", "264", "753", "754"):
+                "180", "235", "236", "238", "493", "494",
+                "151", "264", "753", "754"):
         assert tid in OPLS_TYPES, f"OPLS type {tid} missing from OPLS_TYPES"
 
 
 def test_ff_assigner_uses_smarts_typer_for_oplsaa():
     """Verify the dispatch route: ff_assigner picks the OPLS SMARTS typer
-    for oplsaa, oplsaa2008, loplsaa, loplsaa2008 — not the old Ghemical
-    path (which returned invalid type strings like 'C.3')."""
+    for oplsaa / loplsaa (2024 numbering) and the generic environment
+    typer with the 2008 table for oplsaa2008 / loplsaa2008 (a different
+    numbering) — never the old Ghemical path ('C.3')."""
     import inspect
     from paaf import ff_assigner
+    from paaf.typers.generic import FF_MAPS
     src = inspect.getsource(ff_assigner.assign)
     assert "_assign_opls_smarts" in src
-    # These four FFs must route through the new typer.
-    for key in ("oplsaa", "oplsaa2008", "loplsaa", "loplsaa2008"):
-        assert repr(key) in src or f'"{key}"' in src or f"'{key}'" in src
+    for key in ("oplsaa", "loplsaa"):
+        assert f'"{key}"' in src
+    assert "oplsaa2008" in FF_MAPS and "loplsaa2008" in FF_MAPS
+    assert FF_MAPS["oplsaa2008"][0]["alkane_CH2"] == "81"
 
 
 def test_rules_ordered_specific_before_generic():

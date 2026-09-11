@@ -195,10 +195,19 @@ def parse_atom_types(path: str) -> List[AtomTypeInfo]:
         key = ""
         description = ccomment or mcomment
         cm = _COMMENT_RE.search(ccomment) if ccomment else None
-        if cm and cm.group(1).strip().capitalize() in _ELEMENT_MASS:
+        # "El - key | description" comments (oplsaa2024) name the element;
+        # a free-text comment such as "Alkyl Fluoride C-F" (oplsaa2008) only
+        # LOOKS like one. The mass line is authoritative: when it disagrees
+        # with the comment's element, the comment was free text.
+        _mass_el = _element_from_mass(mass) if mass > 0 else ""
+        if (cm and cm.group(1).strip().capitalize() in _ELEMENT_MASS
+                and (not _mass_el or _mass_el == cm.group(1).strip().capitalize()
+                     or not ccomment.lstrip().startswith(cm.group(1)))):
             element = cm.group(1).strip().capitalize()
             key = cm.group(2).strip()
             description = (cm.group(3) or "").strip().strip('"').strip("'") or ccomment
+            if _mass_el and _mass_el != element:
+                element = _mass_el
         elif ccomment:
             # Comment is free text ("Acetic Acid >C=O (UA)"): element from mass.
             element = _element_from_mass(mass)

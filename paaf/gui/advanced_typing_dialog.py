@@ -119,11 +119,11 @@ class AdvancedTypingDialog(AtomTypingDialog):
             f"{ff.display_name}: {len(tagged)} types loaded (tagged UA:), "
             f"{n_beads} of them carbon beads. Assign a bead to a carbon and its "
             f"hydrogens are absorbed — they will not be written. "
-            + ("OPLS-UA beads live inside OPLS-AA 2024, so mixed bonded terms "
-               "are Jorgensen's own." if key == "oplsua_2024" else
-               "A bridge library (paaf_ua_bridge.lt) is generated at export: "
-               "UA Lennard-Jones and mass, bonded terms borrowed from the "
-               "all-atom sp3 carbon class."))
+            + "At export a bridge library (paaf_ua_bridge.lt) declares each bead "
+              "inside the all-atom force field: LJ, charge and mass from the UA "
+              "library, bonded terms from the all-atom carbon class of the same "
+              "hybridisation (CT / CM / CA), so every bond, angle and dihedral "
+              "across the boundary resolves.")
 
     # ------------------------------------------------------------ assignment
     def _entry_for_key(self, key: int) -> Optional[dict]:

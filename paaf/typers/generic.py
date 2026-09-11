@@ -63,8 +63,12 @@ ENV_RULES: List[Tuple[str, str, str]] = [
     # alcohol / phenol / ether / siloxane
     ("[OX2H][c]",                        "phenol_O",    "phenol O"),
     ("[H][OX2][c]",                      "phenol_H",    "phenol H"),
+    ("[OX2H][Si]",                       "silanol_O",   "silanol Si-OH O"),
+    ("[H][OX2][Si]",                     "silanol_H",   "silanol Si-OH H"),
     ("[OX2H][CX4]",                      "alcohol_O",   "alcohol -OH O"),
     ("[H][OX2][CX4]",                    "alcohol_H",   "alcohol -OH H"),
+    ("[OX2H]",                           "alcohol_O",   "hydroxyl O (other)"),
+    ("[H][OX2]",                         "alcohol_H",   "hydroxyl H (other)"),
     ("[OX2]([Si])[Si]",                  "siloxane_O",  "siloxane Si-O-Si"),
     ("[OX2]([Si])[#6]",                  "siloxane_O",  "Si-O-C oxygen"),
     ("[OX2]([c])[#6]",                   "aryl_ether_O","aryl ether O"),
@@ -131,6 +135,8 @@ ENV_RULES: List[Tuple[str, str, str]] = [
     ("[H][CX4]",                         "alkane_H",    "H on sp3 C"),
     ("[H][Si]",                          "Si_H",        "H on Si"),
     ("[H][H]",                           "H2",          "H2"),
+    ("[H][#7,#8,#16]",                   "amine_H",     "polar H (other N/O/S)"),
+    ("[H][#6]",                          "alkane_H",    "H on carbon (other)"),
     # phosphorus / boron
     ("[PX4](=O)",                        "phosphate_P", "phosphate P"),
     ("[P]",                              "P",           "phosphorus"),
@@ -153,6 +159,7 @@ _ALIAS: Dict[str, str] = {
     "disulfide_S": "sulfide_S", "thione_S": "sulfide_S", "imine_C": "alkene_C",
     "F_aryl": "F_alkyl", "Cl_aryl": "Cl_alkyl", "Br_aryl": "Br_alkyl",
     "epoxide_C": "alkane_CH_X", "epoxide_O": "ether_O", "siloxane_O": "ether_O",
+    "silanol_O": "alcohol_O", "silanol_H": "alcohol_H",
     "methane_C": "alkane_CH3", "alkyne_H": "alkene_H", "Si_H": "alkane_H",
     "thiol_H": "alcohol_H", "sulfone_O": "ketone_O", "nitro_O": "ketone_O",
     "alkene_CH2": "alkene_CH", "phosphate_P": "P",
@@ -251,17 +258,47 @@ _OPLSAA: Dict[str, str] = {
     "alkene_CH": "142", "alkene_C": "141", "alkene_H": "144",
     "ester_C": "465", "ester_Odb": "466", "ester_Os": "467",
     "acid_C": "267", "acid_OH": "268", "acid_Odb": "269", "acid_H": "270",
-    "amide_C": "177", "amide_Odb": "178", "amide_NH": "179", "amide_N": "180",
-    "amide_H": "183", "nitrile_N": "753", "nitrile_C": "754",
+    "amide_C": "235", "amide_Odb": "236", "amide_NH2": "237", "amide_NH": "238",
+    "amide_N": "239", "amide_H": "241", "nitrile_N": "753", "nitrile_C": "754",
     "alcohol_O": "154", "alcohol_H": "155", "ether_O": "180", "epoxide_O": "180",
-    "F_alkyl": "719", "Cl_alkyl": "264", "Br_alkyl": "722", "I_alkyl": "725",
-    "thiol_S": "142", "sulfide_S": "202", "sulfone_S": "473", "sulfone_O": "474",
-    "amine_NH2": "739", "amine_NH": "740", "amine_N": "741", "amine_H": "742",
-    "Si": "500", "P": "440",
+    "F_alkyl": "956", "Cl_alkyl": "151", "Br_alkyl": "975", "I_alkyl": "1014",
+    "F_aryl": "719", "Cl_aryl": "264", "Br_aryl": "730",
+    "thiol_S": "200", "thiol_H": "204", "sulfide_S": "202", "disulfide_S": "203",
+    "sulfone_S": "493", "sulfone_O": "494",
+    "amine_NH2": "900", "amine_NH": "901", "amine_N": "902", "amine_H": "909",
+    "Si": "1060", "siloxane_O": "1078", "Si_H": "1064", "P": "440",
+    "silanol_O": "1073", "silanol_H": "1074",
 }
-_OPLSAA_FALLBACK = {"H": "140", "C": "135", "N": "739", "O": "154", "S": "202",
-                    "F": "719", "Cl": "264", "Br": "722", "I": "725",
-                    "P": "440", "Si": "500"}
+_OPLSAA_FALLBACK = {"H": "140", "C": "135", "N": "900", "O": "154", "S": "202",
+                    "F": "956", "Cl": "151", "Br": "975", "I": "1014",
+                    "P": "440", "Si": "1060"}
+
+# OPLS-AA 2008 (oplsaa2008.lt, Jorgensen/Tinker numbering — completely
+# different ids from the 2024 library).
+_OPLSAA2008: Dict[str, str] = {
+    "alkane_CH3": "80", "alkane_CH2": "81", "alkane_CH": "82", "alkane_C": "84",
+    "alkane_H": "85", "methane_C": "83",
+    "arom_CH": "90", "arom_C": "90", "arom_H": "91",
+    "alkene_CH2": "88", "alkene_CH": "87", "alkene_C": "86", "alkene_H": "89",
+    "alkyne_C": "769", "alkyne_H": "756",
+    "ester_C": "406", "ester_Odb": "407", "ester_Os": "408",
+    "acid_C": "209", "acid_Odb": "210", "acid_OH": "211", "acid_H": "212",
+    "amide_C": "177", "amide_Odb": "178", "amide_NH2": "179", "amide_NH": "180",
+    "amide_N": "181", "amide_H": "183",
+    "ketone_C": "222", "ketone_O": "223", "aldehyde_C": "219", "aldehyde_O": "220",
+    "nitrile_N": "694", "nitrile_C": "695",
+    "alcohol_O": "96", "alcohol_H": "97", "phenol_O": "109", "phenol_H": "110",
+    "ether_O": "122", "epoxide_O": "122", "aryl_ether_O": "121",
+    "F_alkyl": "786", "Cl_alkyl": "800", "Br_alkyl": "805", "I_alkyl": "838",
+    "thiol_S": "142", "thiol_H": "146", "sulfide_S": "144", "disulfide_S": "145",
+    "sulfone_S": "434", "sulfone_O": "435",
+    "amine_NH2": "730", "amine_NH": "731", "amine_N": "732", "amine_H": "739",
+    "nitro_N": "701", "nitro_O": "702",
+    "Si": "866", "Si_H": "870", "P": "381",
+}
+_OPLSAA2008_FALLBACK = {"H": "85", "C": "80", "N": "730", "O": "96", "S": "144",
+                        "F": "786", "Cl": "800", "Br": "805", "I": "838",
+                        "P": "381", "Si": "866"}
 
 FF_MAPS: Dict[str, Tuple[Dict[str, str], Dict[str, str]]] = {
     "compass_published": (_COMPASS, _COMPASS_FALLBACK),
@@ -271,7 +308,8 @@ FF_MAPS: Dict[str, Tuple[Dict[str, str], Dict[str, str]]] = {
     "trappe_ua":         (_TRAPPE, {}),
     "oplsua_2024":       (_OPLSUA, {}),
     "oplsaa":            (_OPLSAA, _OPLSAA_FALLBACK),
-    "oplsaa2008":        (_OPLSAA, _OPLSAA_FALLBACK),
+    "oplsaa2008":        (_OPLSAA2008, _OPLSAA2008_FALLBACK),
+    "loplsaa2008":       (_OPLSAA2008, _OPLSAA2008_FALLBACK),
 }
 
 UNITED_ATOM_KEYS = {"trappe_ua", "oplsua_2024"}

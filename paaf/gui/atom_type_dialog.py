@@ -336,9 +336,11 @@ class AtomTypingDialog(QDialog):
         SMARTS typer in ``paaf.typers.oplsaa`` applies to every one of them.
         United-atom OPLS (OPLS-UA) uses a different numbering, so it is excluded.
         """
+        name = (self._ff_key or "")
+        if "2008" in name:          # oplsaa2008.lt is a different numbering
+            return False
         if self._ff_inherit == "OPLSAA":
             return True
-        name = (self._ff_key or "")
         if "ua" in name:            # oplsua_2024, opls_ua -> different numbering
             return False
         return name.startswith("oplsaa") or name.startswith("loplsaa")

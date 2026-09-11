@@ -39,22 +39,22 @@ log = get_logger(__name__)
 _ELEMENT_FALLBACK: Dict[str, str] = {
     "H":  "140",   # HC — aliphatic H
     "C":  "135",   # CT — sp3 alkane C
-    "N":  "739",   # N  — primary amine N
+    "N":  "900",   # N  — primary amine N
     "O":  "154",   # OH — alcohol O
     "S":  "202",   # S  — sulfide
-    "F":  "719",   # F  — aliphatic halide
-    "Cl": "264",   # Cl — aliphatic halide
-    "Br": "722",   # Br — aliphatic halide
-    "I":  "725",   # I  — aliphatic halide
+    "F":  "956",   # F  — alkyl fluoride
+    "Cl": "151",   # Cl — alkyl chloride
+    "Br": "975",   # Br — alkyl bromide
+    "I":  "1014",  # I  — alkyl iodide
     "P":  "440",   # P  — generic phosphorus
-    "Si": "500",   # Si — generic silicon
+    "Si": "1060",  # Si — tetraalkylsilane
 }
 
 
 _RULES: List[Tuple[str, str, str]] = [
     # ---- Epoxide (3-membered ring with one O) ---------------------------
     ("[OX2r3]",                           "180", "epoxide oxygen (3-ring)"),
-    ("[CX4r3][OX2r3][CX4r3]",             "180", "epoxide oxygen (both C sp3)"),
+    ("[OX2r3]([CX4r3])[CX4r3]",           "180", "epoxide oxygen (both C sp3)"),
     ("[CX4r3][OX2r3]",                    "136", "epoxide sp3 C"),
 
     # ---- Anisole / methoxy on aromatic ring -----------------------------
@@ -86,12 +86,12 @@ _RULES: List[Tuple[str, str, str]] = [
     ("[H][OX2][CX3](=O)",                 "270", "carboxylic acid OH hydrogen"),
 
     # ---- Amide (-C(=O)N-) ------------------------------------------------
-    ("[CX3](=O)[NX3]",                    "177", "amide carbonyl C"),
-    ("[OX1]=[CX3][NX3]",                  "178", "amide carbonyl O"),
-    ("[NX3H0]([CX3]=O)([#6])[#6]",        "180", "tertiary amide N"),
-    ("[NX3H1]([CX3]=O)[#6]",              "179", "secondary amide N-H"),
-    ("[NX3H2][CX3](=O)",                  "179", "primary amide -NH2"),
-    ("[H][NX3][CX3](=O)",                 "183", "amide N-H hydrogen"),
+    ("[CX3](=O)[NX3]",                    "235", "amide carbonyl C"),
+    ("[OX1]=[CX3][NX3]",                  "236", "amide carbonyl O"),
+    ("[NX3H0]([CX3]=O)([#6])[#6]",        "239", "tertiary amide N"),
+    ("[NX3H1]([CX3]=O)[#6]",              "238", "secondary amide N-H"),
+    ("[NX3H2][CX3](=O)",                  "237", "primary amide -NH2"),
+    ("[H][NX3][CX3](=O)",                 "241", "amide N-H hydrogen"),
 
     # ---- Nitrile ---------------------------------------------------------
     ("[NX1]#[CX2]",                       "753", "nitrile N"),
@@ -120,19 +120,20 @@ _RULES: List[Tuple[str, str, str]] = [
     ("[CX4]([CH3])([CX3](=O)[OX2])[#6]",  "139", "methacrylate quaternary C"),
 
     # ---- Halides ---------------------------------------------------------
-    ("[FX1][CX4]",                        "719", "F on sp3 C"),
-    ("[ClX1][CX4]",                       "264", "Cl on sp3 C"),
-    ("[BrX1][CX4]",                       "722", "Br on sp3 C"),
-    ("[IX1][CX4]",                        "725", "I on sp3 C"),
+    ("[FX1][CX4]",                        "956", "F on sp3 C"),
+    ("[ClX1][CX4]",                       "151", "Cl on sp3 C"),
+    ("[BrX1][CX4]",                       "975", "Br on sp3 C"),
+    ("[IX1][CX4]",                        "1014", "I on sp3 C"),
     ("[FX1][cX3]",                        "728", "F on aromatic C"),
-    ("[ClX1][cX3]",                       "263", "Cl on aromatic C"),
-    ("[BrX1][cX3]",                       "731", "Br on aromatic C"),
+    ("[ClX1][cX3]",                       "264", "Cl on aromatic C"),
+    ("[BrX1][cX3]",                       "730", "Br on aromatic C"),
 
     # ---- Sulfur ----------------------------------------------------------
-    ("[SX2H][#6]",                        "142", "thiol -SH sulfur"),
+    ("[SX2H][#6]",                        "200", "thiol -SH sulfur"),
+    ("[H][SX2]",                          "204", "thiol S-H hydrogen"),
     ("[SX2]([#6])[#6]",                   "202", "sulfide S"),
-    ("[SX4](=O)(=O)([#6])[#6]",           "473", "sulfone S"),
-    ("[OX1]=[SX4]",                       "474", "sulfone =O"),
+    ("[SX4](=O)(=O)([#6])[#6]",           "493", "sulfone S"),
+    ("[OX1]=[SX4]",                       "494", "sulfone =O"),
 
     # ---- Alkene carbons --------------------------------------------------
     ("[CX3H2]=[CX3]",                     "143", "terminal =CH2 alkene"),
@@ -152,10 +153,10 @@ _RULES: List[Tuple[str, str, str]] = [
     ("[H][CX4]",                          "140", "sp3 C-H hydrogen"),
 
     # ---- Amine (primary/secondary/tertiary aliphatic) -------------------
-    ("[NX3H2][CX4]",                      "739", "primary amine N-H2"),
-    ("[NX3H1]([CX4])[CX4]",               "740", "secondary amine N-H"),
-    ("[NX3H0]([CX4])([CX4])[CX4]",        "741", "tertiary amine N"),
-    ("[H][NX3][CX4]",                     "742", "amine N-H hydrogen"),
+    ("[NX3H2][CX4]",                      "900", "primary amine N-H2"),
+    ("[NX3H1]([CX4])[CX4]",               "901", "secondary amine N-H"),
+    ("[NX3H0]([CX4])([CX4])[CX4]",        "902", "tertiary amine N"),
+    ("[H][NX3][CX4]",                     "909", "amine N-H hydrogen"),
 ]
 
 
@@ -284,31 +285,36 @@ OPLS_TYPES = {
     "165": "CA — phenol C-O",
     "180": "OS — ether O",
     "199": "CA — anisole/aryl-ether C",
+    "200": "SH — thiol S",
+    "204": "HS — thiol H",
     "202": "S  — sulfide",
-    "209": "C  — carboxylic acid carbonyl",
-    "210": "C_2 — ester carbonyl",
-    "211": "OS — ester -O-",
-    "212": "O_2 — ester =O",
-    "263": "Cl — aromatic",
-    "264": "Cl — aliphatic",
+    "267": "C  — carboxylic acid carbonyl",
     "268": "OH — carboxyl -OH oxygen",
+    "269": "O  — carboxyl =O",
     "270": "HO — carboxyl -OH hydrogen",
-    "473": "SY — sulfone S",
-    "474": "OY — sulfone =O",
-    "719": "F  — aliphatic",
-    "722": "Br — aliphatic",
-    "725": "I  — aliphatic",
-    "728": "F  — aromatic",
-    "731": "Br — aromatic",
-    "739": "N3 — primary amine",
-    "740": "N3 — secondary amine",
-    "741": "N3 — tertiary amine",
-    "742": "H  — amine H",
+    "465": "C  — ester carbonyl",
+    "466": "O  — ester =O",
+    "467": "OS — ester -O-",
+    "235": "C  — amide carbonyl",
+    "236": "O  — amide =O",
+    "237": "N  — primary amide N",
+    "238": "N  — secondary amide N-H",
+    "239": "N  — tertiary amide N",
+    "241": "H  — amide N-H hydrogen",
+    "900": "NT — primary amine",
+    "901": "NT — secondary amine",
+    "902": "NT — tertiary amine",
+    "909": "H  — amine H",
     "753": "NZ — nitrile N",
     "754": "CZ — nitrile C",
-    "177": "C  — amide carbonyl",
-    "178": "O  — amide =O",
-    "179": "N  — amide N-H",
-    "183": "H  — amide N-H hydrogen",
-    "142_s": "S  — thiol S",
+    "493": "SY — sulfone S",
+    "494": "OY — sulfone =O",
+    "956": "F  — alkyl fluoride",
+    "151": "Cl — alkyl chloride",
+    "975": "Br — alkyl bromide",
+    "1014": "I  — alkyl iodide",
+    "728": "F  — aromatic",
+    "264": "Cl — aromatic",
+    "730": "Br — aromatic",
+    "1060": "Si — tetraalkylsilane",
 }

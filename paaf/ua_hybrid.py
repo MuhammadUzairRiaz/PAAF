@@ -15,18 +15,21 @@ Three situations are handled with the same code:
 1. **UA-only** (TraPPE-UA or OPLS-UA chosen as the force field): every atom
    typed with a bead type loses its hydrogens; hydrogens the library cannot
    model are reported before anything is written.
-2. **Hybrid, same family** (OPLS-AA 2024 + OPLS-UA 2024): the UA block
-   (types 66–134) lives *inside* ``oplsaa2024.lt`` with its own bonded
-   classes (C2, C3, CH …) and Jorgensen's mixed terms (``CT_C2``,
-   ``HC_CT_C2`` …), so a chain may carry both — no bridging needed.
-3. **Hybrid, different family** (e.g. OPLS-AA + TraPPE-UA): a small bridge
-   library ``paaf_ua_bridge.lt`` is generated. It inherits the all-atom
-   force field, declares the beads as new atom types with the UA library's
-   own Lennard-Jones parameters and masses, zero charge, and maps their
-   bonded behaviour onto the all-atom sp3-carbon classes (``replace{}``
-   equivalence), so every bond/angle/dihedral across the UA/AA boundary
-   resolves. Cross non-bonded terms follow the all-atom force field's mixing
-   rule, exactly as DL_FIELD does between force fields.
+2. **Hybrid** (any all-atom OPLS library + OPLS-UA or TraPPE-UA beads,
+   whether the bead was picked from the UA list or, for the OPLS-UA block
+   that lives inside OPLS-AA 2024, straight from the all-atom table): a
+   small bridge library ``paaf_ua_bridge.lt`` is generated. It re-opens the
+   all-atom force field's namespace and declares each bead as a new atom
+   type with the UA library's own Lennard-Jones parameters, charge and
+   mass, and maps its bonded behaviour onto the all-atom carbon class of
+   the same hybridisation (sp3 -> CT, sp2 -> CM, aromatic -> CA) through
+   ``replace{}`` equivalence. Every bond/angle/dihedral across the UA/AA
+   boundary — to O, N, S, Si, halogens, anything the all-atom library
+   knows — therefore resolves. Cross non-bonded terms follow the all-atom
+   force field's mixing rule, exactly as DL_FIELD does between force
+   fields. (Jorgensen's native UA bonded classes are not used: they lack
+   terms for many neighbours, e.g. Si–C2, and the harmonic parameters are
+   the same as the CT ones to within a few percent anyway.)
 
 Types coming from the secondary (UA) library are tagged ``UA:<id>`` in the
 manual-type map so they can be told apart from the primary library's ids.
@@ -62,6 +65,15 @@ def bead_h_count(type_key: str, description: str = "", element: str = "") -> Opt
     ``C (SP3) NEOPENTANE`` -> 0, ``CH4`` -> 4. ``None`` when the text does not
     describe a carbon bead (e.g. ``O ALCOHOLS``): such a type absorbs nothing.
     """
+    if element and element != "C":
+        return None
+    # 1. OPLS bonded-class keys name the bead outright (C3 = CH3, C2 = CH2,
+    #    CH, C4 = CH4, C9 = =CH2, C8 = =CH-, CD = aromatic CH, C7 = =C<).
+    cls = (type_key or "").strip()
+    n = _OPLS_UA_CLASS_H.get(cls)
+    if n is not None:
+        return n
+    # 2. Name / description starting with CHn (TraPPE "CH2", "CH3 IN METHANOL").
     for text in (description or "", type_key or ""):
         text = text.strip()
         if not text:
@@ -69,11 +81,20 @@ def bead_h_count(type_key: str, description: str = "", element: str = "") -> Opt
         m = re.match(r"^(?:@atom:)?CH(\d)?(?![A-Za-z0-9])", text)
         if m:
             return int(m.group(1)) if m.group(1) else 1
-        m = re.match(r"^(?:@atom:)?C(?![A-Za-z0-9])", text)
-        if m and element in ("", "C"):
-            # bare "C (SP3) NEOPENTANE" — a carbon bead with no hydrogens
+    # 3. CHn as a word anywhere ("ETHER CH3 (-O)", "CH2 Methylenechloride").
+    m = re.search(r"(?<![A-Za-z0-9])CH(\d)?(?![A-Za-z0-9])", description or "")
+    if m:
+        return int(m.group(1)) if m.group(1) else 1
+    # 4. bare "C (SP3) NEOPENTANE", "C IN CH3CN" — a carbon bead with no H.
+    for text in (description or "", type_key or ""):
+        if re.match(r"^(?:@atom:)?C(?![A-Za-z0-9])", text.strip()):
             return 0
     return None
+
+
+# OPLS united-atom bonded classes -> hydrogens the bead stands for.
+_OPLS_UA_CLASS_H = {"C3": 3, "C2": 2, "CH": 1, "C4": 4, "C9": 2, "C8": 1,
+                    "CD": 1, "C7": 0}
 
 
 def bead_table(lt_path: Path) -> Dict[str, Tuple[int, float, str]]:
@@ -136,18 +157,14 @@ def absorb_hydrogens(mol: Molecule, plan: AbsorptionPlan) -> Tuple[Molecule, Dic
     remap = {a.index: k for k, a in enumerate(keep)}
     new = Molecule(name=mol.name, source_path=mol.source_path)
     for k, a in enumerate(keep):
+        # Names are regenerated from the new index: moltemplate merges atoms
+        # that share a $atom name, and chains assembled from copies of one
+        # monomer can carry duplicate names.
         na = Atom(index=k, element=a.element, xyz=np.array(a.xyz, dtype=float),
-                  name=a.name or f"{a.element}{k + 1}", charge=a.charge,
-                  ff_type=a.ff_type)
+                  name=f"{a.element}{k + 1}", charge=a.charge, ff_type=a.ff_type)
         new.atoms.append(na)
     new.bonds = [(remap[i], remap[j], o) for i, j, o in mol.bonds
                  if i in remap and j in remap]
-    # unique names after renumbering
-    seen = set()
-    for a in new.atoms:
-        if a.name in seen or not a.name:
-            a.name = f"{a.element}{a.index + 1}"
-        seen.add(a.name)
     return new, remap
 
 
@@ -171,9 +188,29 @@ def _equivalence_suffix(lt_path: Path, type_id: str) -> str:
 
 def _lj_params(lt_path: Path, type_id: str) -> Optional[Tuple[float, float]]:
     text = Path(lt_path).read_text(errors="replace")
-    m = re.search(rf"^\s*pair_coeff\s+@atom:{re.escape(type_id)}\s+@atom:{re.escape(type_id)}"
+    t = re.escape(type_id)
+    m = re.search(rf"^\s*pair_coeff\s+@atom:{t}(?:_\S*)?\s+@atom:{t}(?:_\S*)?"
                   rf"\s+(?:[a-z][\w/]*\s+)?([-\d.eE+]+)\s+([-\d.eE+]+)", text, re.M)
     return (float(m.group(1)), float(m.group(2))) if m else None
+
+
+def _charge(lt_path: Path, type_id: str) -> float:
+    text = Path(lt_path).read_text(errors="replace")
+    m = re.search(rf"^\s*set\s+type\s+@atom:{re.escape(type_id)}\s+charge\s+([-\d.eE+]+)", text, re.M)
+    return float(m.group(1)) if m else 0.0
+
+
+def _ua_class(lt_path: Path, type_id: str) -> str:
+    """OPLS bonded class of a UA type from its charge-line comment (C3, C2, CH, C9 …)."""
+    text = Path(lt_path).read_text(errors="replace")
+    m = re.search(rf"^\s*set\s+type\s+@atom:{re.escape(type_id)}\s+charge\s+\S+\s*#\s*\S+\s*-\s*(\S+)", text, re.M)
+    return m.group(1) if m else ""
+
+
+# All-atom type whose bonded classes a bead borrows, by the bead's own
+# hybridisation: sp3 -> CT (136), sp2 -> CM (141), aromatic -> CA (145).
+_CLASS_TO_AA_REP = {"C3": "136", "C2": "136", "CH": "136", "C4": "136", "CT": "136",
+                    "C9": "141", "C8": "141", "C7": "141", "CD": "145"}
 
 
 def bridge_type_name(tid: str) -> str:
@@ -181,16 +218,24 @@ def bridge_type_name(tid: str) -> str:
 
 
 def write_bridge_lt(out_dir: Path, primary_ff, ua_ff, beads_used: Dict[str, Tuple[int, float, str]],
-                    sp3_type: str) -> Path:
+                    sp3_type: str, extra_sources=()) -> Path:
     """Generate ``paaf_ua_bridge.lt`` declaring the UA beads inside the AA force field.
 
     ``sp3_type`` is the primary library's all-atom sp3 carbon type (OPLS
-    ``136``) whose bonded equivalence classes the beads borrow.
+    ``136``). Each bead borrows the bonded classes of the all-atom carbon
+    with its own hybridisation (sp3 -> CT, sp2 -> CM, aromatic -> CA), so
+    every bond/angle/dihedral/improper it takes part in — to any neighbour
+    the all-atom library knows, Si and S included — resolves.
     """
-    ua_lt = ua_ff.bundled_path()
     aa_lt = primary_ff.bundled_path()
     sub = _pair_substyle(aa_lt)
     suffix = _equivalence_suffix(aa_lt, sp3_type)
+    # (ua_ff, ua_lt, beads) per united-atom source; beads from the all-atom
+    # library's own UA block come as a second source.
+    sources = [(ua_ff, ua_ff.bundled_path(), dict(beads_used))]
+    for ff2, beads2 in extra_sources:
+        if beads2:
+            sources.append((ff2, ff2.bundled_path(), dict(beads2)))
     if not suffix:
         raise RuntimeError(
             f"{primary_ff.display_name} has no bonded-equivalence table "
@@ -199,9 +244,10 @@ def write_bridge_lt(out_dir: Path, primary_ff, ua_ff, beads_used: Dict[str, Tupl
             f"all-atom force field for UA/AA mixing, or OPLS-UA 2024 as the "
             f"united-atom one (its beads are already part of OPLS-AA 2024).")
     lines = [
-        f"# Generated by PAAF: {ua_ff.display_name} beads inside {primary_ff.display_name}.",
-        "# Non-bonded (LJ, mass) from the united-atom library, charge 0;",
-        f"# bonded terms borrowed from the all-atom sp3 carbon class of type {sp3_type}",
+        f"# Generated by PAAF: united-atom beads inside {primary_ff.display_name}.",
+        "# Non-bonded (LJ, charge, mass) from the united-atom library;",
+        "# bonded terms borrowed from the all-atom carbon class of matching",
+        f"# hybridisation (sp3: type {sp3_type} / CT, sp2: CM, aromatic: CA)",
         "# so bonds/angles/dihedrals across the UA/AA boundary resolve.",
         f'import "{primary_ff.lt_include}"',
         "",
@@ -210,29 +256,36 @@ def write_bridge_lt(out_dir: Path, primary_ff, ua_ff, beads_used: Dict[str, Tupl
         # live inside it, so the beads must be declared there, not in a
         # child object.
         f"{primary_ff.inherit} {{",
-        '  write_once("Data Masses") {',
     ]
-    for tid, (n_h, mass, desc) in sorted(beads_used.items()):
-        lines.append(f"    @atom:{bridge_type_name(tid)} {mass:.4f}   # {ua_ff.key} {tid}: {desc}")
+    lines.append('  write_once("Data Masses") {')
+    for ff_i, lt_i, beads_i in sources:
+        for tid, (n_h, mass, desc) in sorted(beads_i.items()):
+            lines.append(f"    @atom:{bridge_type_name(tid)} {mass:.4f}   # {ff_i.key} {tid}: {desc}")
     lines += ["  }", '  write_once("In Charges") {']
-    for tid in sorted(beads_used):
-        lines.append(f"    set type @atom:{bridge_type_name(tid)} charge 0.0")
+    for ff_i, lt_i, beads_i in sources:
+        for tid in sorted(beads_i):
+            lines.append(f"    set type @atom:{bridge_type_name(tid)} charge {_charge(lt_i, tid):.4f}")
     lines += ["  }", '  write_once("In Settings") {']
-    for tid in sorted(beads_used):
-        lj = _lj_params(ua_lt, tid)
-        if lj is None:
-            raise RuntimeError(f"no pair_coeff for {ua_ff.key} type {tid} in {ua_lt.name}")
-        eps, sig = lj
-        name = bridge_type_name(tid)
-        lines.append(f"    pair_coeff @atom:{name} @atom:{name} {sub} {eps:.6f} {sig:.4f}".rstrip())
+    for ff_i, lt_i, beads_i in sources:
+        for tid in sorted(beads_i):
+            lj = _lj_params(lt_i, tid)
+            if lj is None:
+                raise RuntimeError(f"no pair_coeff for {ff_i.key} type {tid} in {lt_i.name}")
+            eps, sig = lj
+            name = bridge_type_name(tid)
+            lines.append(f"    pair_coeff @atom:{name} @atom:{name} {sub} {eps:.6f} {sig:.4f}".rstrip())
     lines += ["  }"]
-    for tid in sorted(beads_used):
-        name = bridge_type_name(tid)
-        lines.append(f"  replace{{ @atom:{name} @atom:{name}{suffix} }}")
+    for ff_i, lt_i, beads_i in sources:
+        for tid in sorted(beads_i):
+            name = bridge_type_name(tid)
+            rep_id = _CLASS_TO_AA_REP.get(_ua_class(lt_i, tid), sp3_type)
+            sfx = _equivalence_suffix(aa_lt, rep_id) or suffix
+            lines.append(f"  replace{{ @atom:{name} @atom:{name}{sfx} }}")
     lines += [f"}}  # {primary_ff.inherit} (+ PAAF united-atom beads)", ""]
     p = Path(out_dir) / BRIDGE_FILE
     p.write_text("\n".join(lines))
-    log.info("Wrote UA/AA bridge library %s (%d bead types)", p, len(beads_used))
+    log.info("Wrote UA/AA bridge library %s (%d bead types)", p,
+             sum(len(b) for _, _, b in sources))
     return p
 
 
@@ -307,32 +360,38 @@ def apply_hybrid(chain: Molecule, primary_ff, ua_ff, out_dir: Path,
                 f"{untyped_h[0].index + 1}): their carbon was not given a bead "
                 f"type. Type every carbon as a CHn bead, or mix with an "
                 f"all-atom force field (Advanced typing).")
-    elif same_family:
-        for a in new.atoms:
-            if a.ff_type and a.ff_type.startswith(UA_PREFIX):
-                a.ff_type = a.ff_type[len(UA_PREFIX):]
-            if a.ff_type in beads and a.element == "C":
-                res.bead_masses[a.ff_type] = beads[a.ff_type][1]
-        say(f"OPLS-UA beads used inside OPLS-AA 2024 (same library; mixed "
-            f"bonded terms such as CT-C2 are Jorgensen's own).")
     else:
-        used = {}
+        # Every bead — from the secondary library (UA:) or the all-atom
+        # library's own UA block — is declared through the bridge: its own
+        # LJ/charge/mass, bonded classes of the matching all-atom carbon.
+        # Using the UA block's native bonded classes instead fails the
+        # moment a bead sits next to Si, S or another atom Jorgensen never
+        # paired with a united-atom carbon; the all-atom classes cover all.
+        used_sec: Dict[str, Tuple[int, float, str]] = {}
+        used_own: Dict[str, Tuple[int, float, str]] = {}
         for a in new.atoms:
             if a.ff_type and a.ff_type.startswith(UA_PREFIX):
                 tid = a.ff_type[len(UA_PREFIX):]
-                used[tid] = beads[tid]
+                used_sec[tid] = beads[tid]
                 a.ff_type = bridge_type_name(tid)
                 res.bead_masses[a.ff_type] = beads[tid][1]
             elif a.ff_type in own_beads and a.element == "C":
-                res.bead_masses[a.ff_type] = own_beads[a.ff_type][1]
-        if used:
-            sp3 = FF_MAPS.get(primary_ff.key, ({}, {}))[0].get("alkane_CH2", "")
-            write_bridge_lt(Path(out_dir), primary_ff, ua_ff, used, sp3)
-            res.inherit = primary_ff.inherit
-            res.lt_include = BRIDGE_FILE
-            say(f"Bridge library {BRIDGE_FILE}: {len(used)} {ua_ff.display_name} bead "
-                f"type(s) declared inside {primary_ff.display_name}; bonded terms "
-                f"borrowed from all-atom type {sp3}.")
+                tid = a.ff_type
+                used_own[tid] = own_beads[tid]
+                a.ff_type = bridge_type_name(tid)
+                res.bead_masses[a.ff_type] = own_beads[tid][1]
+        sp3 = FF_MAPS.get(primary_ff.key, ({}, {}))[0].get("alkane_CH2", "")
+        own_ff = get_ff("oplsua_2024")
+        if ua_ff.key == own_ff.key:
+            write_bridge_lt(Path(out_dir), primary_ff, ua_ff, {**used_sec, **used_own}, sp3)
+        else:
+            write_bridge_lt(Path(out_dir), primary_ff, ua_ff, used_sec, sp3,
+                            extra_sources=[(own_ff, used_own)])
+        res.inherit = primary_ff.inherit
+        res.lt_include = BRIDGE_FILE
+        say(f"Bridge library {BRIDGE_FILE}: {len(used_sec) + len(used_own)} united-atom "
+            f"bead type(s) declared inside {primary_ff.display_name} (LJ/charge/mass "
+            f"from the UA library, bonded terms from the all-atom CT/CM/CA classes).")
     say(f"United-atom absorption: {res.n_beads} bead(s), {res.removed_h} "
         f"hydrogen(s) removed; chain now {len(new.atoms)} atoms.")
     return res
