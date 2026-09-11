@@ -264,18 +264,22 @@ def apply_hybrid(chain: Molecule, primary_ff, ua_ff, out_dir: Path,
     beads = bead_table(ua_ff.bundled_path())
     types = {a.index: a.ff_type for a in chain.atoms if a.ff_type}
     same_family = (ua_ff.key == "oplsua_2024" and primary_ff.key in _OPLS_AA_KEYS)
+    # Beads the all-atom library carries itself (the OPLS-UA block inside
+    # OPLS-AA). A type picked from the all-atom table without the UA: tag is
+    # the same united-atom choice and absorbs its hydrogens all the same —
+    # whichever secondary library (if any) was chosen.
+    own_beads = primary_own_beads(primary_ff) if not ua_only else {}
     if ua_only:
         plan = plan_absorption(chain, types, beads, strip_prefix=False)
-    elif same_family:
-        # The UA block (66-134) is part of OPLS-AA itself, so a bead may have
-        # been picked from the all-atom table without the UA: tag. Either
-        # spelling is the same united-atom type and absorbs its hydrogens.
-        plan = plan_absorption(chain, {i: t for i, t in types.items()
-                                       if t.startswith(UA_PREFIX)
-                                       or t in beads}, beads)
     else:
-        plan = plan_absorption(chain, {i: t for i, t in types.items()
-                                       if t.startswith(UA_PREFIX)}, beads)
+        tagged = {i: t for i, t in types.items() if t.startswith(UA_PREFIX)}
+        plain = {i: t for i, t in types.items()
+                 if not t.startswith(UA_PREFIX) and t in own_beads}
+        plan = plan_absorption(chain, tagged, beads)
+        plan_own = plan_absorption(chain, plain, own_beads, strip_prefix=False)
+        plan.remove.extend(plan_own.remove)
+        plan.beads.update(plan_own.beads)
+        plan.problems.extend(plan_own.problems)
     if plan.problems:
         raise RuntimeError("United-atom typing problems:\n  " + "\n  ".join(plan.problems))
     if not plan.beads:
@@ -319,16 +323,33 @@ def apply_hybrid(chain: Molecule, primary_ff, ua_ff, out_dir: Path,
                 used[tid] = beads[tid]
                 a.ff_type = bridge_type_name(tid)
                 res.bead_masses[a.ff_type] = beads[tid][1]
-        sp3 = FF_MAPS.get(primary_ff.key, ({}, {}))[0].get("alkane_CH2", "")
-        write_bridge_lt(Path(out_dir), primary_ff, ua_ff, used, sp3)
-        res.inherit = primary_ff.inherit
-        res.lt_include = BRIDGE_FILE
-        say(f"Bridge library {BRIDGE_FILE}: {len(used)} {ua_ff.display_name} bead "
-            f"type(s) declared inside {primary_ff.display_name}; bonded terms "
-            f"borrowed from all-atom type {sp3}.")
+            elif a.ff_type in own_beads and a.element == "C":
+                res.bead_masses[a.ff_type] = own_beads[a.ff_type][1]
+        if used:
+            sp3 = FF_MAPS.get(primary_ff.key, ({}, {}))[0].get("alkane_CH2", "")
+            write_bridge_lt(Path(out_dir), primary_ff, ua_ff, used, sp3)
+            res.inherit = primary_ff.inherit
+            res.lt_include = BRIDGE_FILE
+            say(f"Bridge library {BRIDGE_FILE}: {len(used)} {ua_ff.display_name} bead "
+                f"type(s) declared inside {primary_ff.display_name}; bonded terms "
+                f"borrowed from all-atom type {sp3}.")
     say(f"United-atom absorption: {res.n_beads} bead(s), {res.removed_h} "
         f"hydrogen(s) removed; chain now {len(new.atoms)} atoms.")
     return res
+
+
+def primary_own_beads(primary_ff) -> Dict[str, Tuple[int, float, str]]:
+    """United-atom bead types the all-atom library itself contains.
+
+    OPLS-AA 2024 ships the OPLS-UA block (types 66-134); nothing else does.
+    """
+    if primary_ff.key not in _OPLS_AA_KEYS:
+        return {}
+    from .ff_registry import get_ff
+    try:
+        return bead_table(get_ff("oplsua_2024").bundled_path())
+    except Exception:
+        return {}
 
 
 def implicit_ua_library(primary_ff, chain: Molecule) -> Optional[str]:

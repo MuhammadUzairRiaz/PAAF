@@ -76,8 +76,12 @@ class AdvancedTypingDialog(AtomTypingDialog):
         return self.lib_filter.currentData() if hasattr(self, "lib_filter") else "all"
 
     def ua_key(self) -> Optional[str]:
-        """The secondary library actually used (None if no UA type assigned)."""
-        if any(self._bead_spec(t) for t in self._types_by_atom.values()):
+        """The secondary library actually used (None if no UA: type assigned).
+
+        Beads picked from the all-atom table need no secondary library: the
+        export recognises them on its own (implicit_ua_library).
+        """
+        if any(t.startswith(UA_PREFIX) for t in self._types_by_atom.values()):
             return self._ua_key
         return None
 
@@ -147,9 +151,19 @@ class AdvancedTypingDialog(AtomTypingDialog):
             return None
         if tid.startswith(UA_PREFIX):
             return self._ua_beads.get(tid[len(UA_PREFIX):])
-        if self._ua_key == "oplsua_2024" and self._is_opls_family():
-            return self._ua_beads.get(tid)
-        return None
+        # A bead picked from the all-atom table (OPLS-AA carries the OPLS-UA
+        # block) behaves exactly like one picked from the UA list.
+        return self._own_beads().get(tid)
+
+    def _own_beads(self) -> Dict[str, Tuple[int, float, str]]:
+        if not hasattr(self, "_own_beads_cache"):
+            from ..ff_registry import get_ff
+            from ..ua_hybrid import primary_own_beads
+            try:
+                self._own_beads_cache = primary_own_beads(get_ff(self._ff_key))
+            except Exception:
+                self._own_beads_cache = {}
+        return self._own_beads_cache
 
     def _absorbed_h_keys(self) -> Dict[int, int]:
         """``{H row key: bead row key}`` for every hydrogen a UA bead absorbs."""

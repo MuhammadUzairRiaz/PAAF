@@ -1455,7 +1455,11 @@ class MainWindow(QMainWindow):
     def _open_atom_typing_dialog(self) -> None:
         """Open the manual atom-typing dialog for the current FF + monomers."""
         from ..ff_registry import get_ff
-        from .atom_type_dialog import AtomTypingDialog
+        # The advanced dialog is a superset of the plain one (same table,
+        # plus an optional united-atom library). Using it here too means a
+        # UA-block type picked from the all-atom table shows its hydrogens
+        # as absorbed, exactly as it would from the UA list.
+        from .advanced_typing_dialog import AdvancedTypingDialog as AtomTypingDialog
         specs = self.builder_tab.monomer_specs()
         if not specs:
             QMessageBox.warning(
@@ -1494,12 +1498,15 @@ class MainWindow(QMainWindow):
             ff_key=ff.key,
             ff_inherit=ff.inherit,
             monomer_specs=specs,
+            ua_key=getattr(self, "_ua_secondary_key", None),
         )
         if dlg.exec_() == dlg.Accepted:
             overrides = dlg.overrides()
             self.ff_manual_types.setPlainText(
                 "\n".join(f"{k}:{v}" for k, v in sorted(overrides.items()))
             )
+            self._ua_secondary_key = dlg.ua_key()
+            self._refresh_ua_mix_label()
             self.statusBar().showMessage(
                 f"Applied {len(overrides)} manual atom-type overrides.", 5000)
 

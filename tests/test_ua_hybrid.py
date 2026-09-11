@@ -203,3 +203,18 @@ def test_plain_ua_block_type_from_aa_table_also_absorbs(tmp_path):
     assert not [a for a in res.chain.atoms if a.element == "H"]
     assert res.bead_masses["74"] == pytest.approx(13.019)
     assert {a.ff_type for a in res.chain.atoms} == {"68", "71", "74"}
+
+
+def test_plain_ua_block_types_absorb_with_trappe_secondary_and_without_any(tmp_path):
+    """Same behaviour whichever table the bead came from, whichever secondary."""
+    from paaf.ua_hybrid import primary_own_beads
+    assert "74" in primary_own_beads(get_ff("oplsaa"))
+    assert primary_own_beads(get_ff("compass_published")) == {}
+    mol = _typed("oplsaa", "trappe_ua", [0, 1])        # UA:CH3, UA:CH2 tagged
+    mol.atoms[2].ff_type = "71"                         # plain OPLS-UA CH2 from AA table
+    res = apply_hybrid(mol, get_ff("oplsaa"), get_ff("trappe_ua"), tmp_path)
+    assert res.removed_h == 3 + 2 + 2
+    assert res.bead_masses["71"] == pytest.approx(14.027)
+    assert res.bead_masses["UA_CH2"] == pytest.approx(14.171, abs=1e-3)
+    mw = Path("paaf/gui/main_window.py").read_text()
+    assert "AdvancedTypingDialog as AtomTypingDialog" in mw
