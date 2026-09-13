@@ -40,6 +40,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 from ..logging_utils import get_logger
+from .soft_stage import soft_stage_lines
 
 log = get_logger(__name__)
 
@@ -239,6 +240,25 @@ def build_cg_cell(
             if mol_of[i] == mol_of[i - 1] == mol_of[i - 2]:
                 angles.append((type_of[i - 1], i - 1, i, i + 1))
 
+    # ---- backbone mapping: start bonds at the FENE+WCA minimum
+    # One bead per skeletal atom puts bonded beads at the chemical bond
+    # length (1.53 A for PE), about 0.5 sigma at melt density: far inside the
+    # FENE+WCA well, so the first stage spent itself decompressing bonds.
+    # Each chain is rebuilt from its first bead with every bond vector kept
+    # in direction and set to 0.97 sigma, then wrapped back into the box.
+    if st.mapping == "backbone" and bonds:
+        rescaled = pos.copy()
+        for bt, i, j in bonds:
+            d = pos[j - 1] - pos[i - 1]
+            d -= dims * np.round(d / dims)
+            n = float(np.linalg.norm(d))
+            if n < 1e-9:
+                continue
+            rescaled[j - 1] = rescaled[i - 1] + d * (0.97 * sigma[bt - 1] / n)
+        pos = rescaled - np.floor(rescaled / dims) * dims
+        emit(f"  backbone beads respaced to 0.97 sigma along each chain "
+             f"(FENE+WCA minimum)")
+
     # ---- starting bond length vs the FENE+WCA minimum (~0.97 sigma)
     spacing_note = ""
     if bonds:
@@ -304,11 +324,9 @@ def build_cg_cell(
          f"read_data       {data.name}",
          "",
          "# ---- stage 1: soft push-off (constructed cells have overlaps)",
-         "pair_style      soft " + f"{max(wca):.4f}",
-         "pair_coeff      * * 0.0",
-         "variable        pf equal ramp(1.0,"
-         + ("60.0" if st.units == "lj" else f"{60.0 * eps_real:.2f}") + ")",
-         "fix             PUSH all adapt 1 pair soft a * * v_pf",
+         *soft_stage_lines(f"{max(wca):.4f}", 1.0,
+                           "60.0" if st.units == "lj" else f"{60.0 * eps_real:.2f}",
+                           var="pf", adapt_fix="PUSH"),
          "special_bonds   fene",
          "bond_style      fene",]
     for t in range(n_types):

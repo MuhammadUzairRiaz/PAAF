@@ -428,6 +428,25 @@ def extract_style_lines(init_path: Path) -> List[str]:
     return out
 
 
+def extract_coeff_lines(input_path: Path) -> List[str]:
+    """The ``pair_coeff`` commands of a LAMMPS input (DL_FIELD's lammps.in).
+
+    DL_FIELD keeps its pair coefficients in the input script, not in the data
+    file. A deck that reads only the data file therefore has none, and LAMMPS
+    stops at the first run with "All pair coeffs are not set".
+    """
+    try:
+        text = Path(input_path).read_text(errors="ignore")
+    except OSError:
+        return []
+    out: List[str] = []
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line and line.split()[0] == "pair_coeff":
+            out.append(line)
+    return out
+
+
 def find_gromacs(explicit: str = "") -> Optional[Path]:
     """Locate ``gmx``, reusing the search the GROMACS packer already has.
 
@@ -714,7 +733,12 @@ def write_relax_input(out_dir: Path, data_file: str,
     out_dir.mkdir(parents=True, exist_ok=True)
     L: List[str] = []
 
-    _push = settings.push_off and bool(init_file)
+    # The push-off switches pair_style and back, which clears every pair
+    # coefficient; it needs them in a file outside the data file to restore.
+    # That is moltemplate's init/settings pair, or a styles table plus a
+    # coefficients file (DL_FIELD's pair_coeff lines, see cell_export).
+    _styles_restorable = bool(styles) and bool(settings_file) and not init_file
+    _push = settings.push_off and (bool(init_file) or _styles_restorable)
     L.append("# ------------------------------------------------------------")
     L.append("# Relaxation of a PAAF-constructed amorphous cell")
     L.append("#")
@@ -783,8 +807,8 @@ def write_relax_input(out_dir: Path, data_file: str,
     # data file, where they cannot be recovered after a style change — so on
     # that route the push-off is replaced by a displacement-capped
     # minimisation, which is weaker but correct.
-    can_push = settings.push_off and bool(init_file)
-    capped_only = settings.push_off and not init_file
+    can_push = _push
+    capped_only = settings.push_off and not can_push
 
     if capped_only:
         L.append("# ---- Displacement-capped minimisation (no style switch) ----")
@@ -805,6 +829,8 @@ def write_relax_input(out_dir: Path, data_file: str,
         L.append("# that start on top of one another separate gently.")
         _has_kspace = any(ln.split()[:1] == ["kspace_style"]
                           for ln in (restore_lines or []))
+        if not _has_kspace and _styles_restorable:
+            _has_kspace = bool(styles.get("kspace_style"))
         if not _has_kspace and init_file:
             try:
                 _init_txt = (Path(out_dir) / init_file).read_text() \
@@ -813,17 +839,13 @@ def write_relax_input(out_dir: Path, data_file: str,
                                   for ln in _init_txt.splitlines())
             except (OSError, NameError):
                 pass
-        if _has_kspace:
-            # pair_style soft is incompatible with PPPM/Ewald; long-range
-            # electrostatics are switched off here and restored below.
-            L.append("kspace_style    none")
-        L.append(f"pair_style      soft {settings.soft_cutoff}")
-        # The prefactor MUST be given explicitly and start at zero; fix adapt
-        # then ramps it. Omitting it leaves the coefficient unset.
-        L.append("pair_coeff      * * 0.0")
-        L.append(f"variable        prefactor equal ramp(0,{settings.soft_prefactor})")
-        L.append("fix             push all adapt 1 pair soft a * * v_prefactor")
-        L.append(f"fix             lim all nve/limit {settings.nve_limit}")
+        # pair_style soft is incompatible with PPPM/Ewald; long-range
+        # electrostatics are switched off here and restored below. The
+        # prefactor starts at zero and fix adapt ramps it.
+        from .soft_stage import soft_stage_lines
+        L.extend(soft_stage_lines(settings.soft_cutoff, 0, settings.soft_prefactor,
+                                  disable_kspace=_has_kspace,
+                                  nve_limit=settings.nve_limit))
         L.append("velocity        all create 300.0 4928459 mom yes rot yes dist gaussian")
         L.append(f"run             {settings.push_steps}")
         L.append("unfix           push")
@@ -852,6 +874,17 @@ def write_relax_input(out_dir: Path, data_file: str,
                 L.append(f"include         {settings_file}")
             if charges_file:
                 L.append(f"include         {charges_file}")
+            L.append("")
+        elif _styles_restorable:
+            L.append("# Restore the real force field before minimising: the")
+            L.append("# styles, then the pair coefficients from their own file")
+            L.append("# (changing pair_style cleared them).")
+            L.append(f"pair_style      {styles['pair_style']}")
+            if styles.get("pair_modify"):
+                L.append(f"pair_modify     {styles['pair_modify']}")
+            if styles.get("kspace_style"):
+                L.append(f"kspace_style    {styles['kspace_style']}")
+            L.append(f"include         {settings_file}")
             L.append("")
         elif not styles:
             L.append("# WARNING: no force-field styles are available, so the")

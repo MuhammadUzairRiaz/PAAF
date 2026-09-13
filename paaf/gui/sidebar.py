@@ -40,6 +40,9 @@ from PyQt5.QtWidgets import (
 )
 
 from . import tokens as T
+from ..logging_utils import get_logger
+
+log = get_logger(__name__)
 
 # Step states, in the order they appear in a run.
 DONE, NOW, READY, LOCKED, ERROR = "done", "now", "ready", "locked", "error"
@@ -220,7 +223,7 @@ class Sidebar(QWidget):
                 mark.setStyleSheet("background: transparent; border: none;")
                 brand_row.addWidget(mark)
         except Exception:
-            pass
+            log.debug("__init__: ignored error", exc_info=True)
         brand = QLabel("PAAF")
         brand.setStyleSheet(
             f"color: #FFFFFF; font-size: {T.FS_SECTION}px; font-weight: 600;"

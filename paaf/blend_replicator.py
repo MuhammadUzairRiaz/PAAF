@@ -106,7 +106,7 @@ def _build_blend_packmol(pdb_files: List[Path], counts: List[int],
                         packmol_path: Optional[str] = None,
                         regions: Optional[List[Tuple[float, float, float,
                                                      float, float, float]]]
-                        = None) -> bool:
+                        = None, cancel=None) -> bool:
     import random
     exe = _find_packmol(explicit=packmol_path)
     if exe is None:
@@ -148,8 +148,11 @@ def _build_blend_packmol(pdb_files: List[Path], counts: List[int],
     log_path = out_pdb.parent / "packmol.log"
     log.info("Packing %d components (total %d copies) into %.1fx%.1fx%.1f Å (log: %s)",
              len(pdb_files), sum(counts), a, b, c, log_path)
+    from .cell.packing import run_cancellable
     with inp.open() as fh:
-        proc = subprocess.run([exe], stdin=fh, capture_output=True, text=True)
+        # Killable: Cancel stops packmol instead of waiting for it.
+        rc, p_out, p_err = run_cancellable([exe], stdin=fh, cancel=cancel)
+    proc = subprocess.CompletedProcess([exe], rc, p_out, p_err)
     try:
         log_path.write_text(
             "$ " + exe + " < " + str(inp) + "\n\n"
@@ -158,6 +161,11 @@ def _build_blend_packmol(pdb_files: List[Path], counts: List[int],
         )
     except OSError:
         pass
+    if proc.returncode == 173 and out_pdb.exists():
+        # "ENDED WITHOUT PERFECT PACKING": packmol still wrote its best layout.
+        log.warning("packmol (blend) ended without perfect packing: using its "
+                    "best layout; minimise before dynamics.")
+        return True
     if proc.returncode != 0 or not out_pdb.exists():
         tail = "\n".join((proc.stdout or "").splitlines()[-30:])
         log.warning("packmol (blend) failed rc=%d:\n%s", proc.returncode, tail)
@@ -410,6 +418,7 @@ def replicate_blend(
     progress: Optional[Callable[[str], None]] = None,
     regions: Optional[List[Tuple[float, float, float,
                                  float, float, float]]] = None,
+    cancel=None,
 ) -> Path:
     """Pack a multi-component blend and write a consolidated LAMMPS data file.
 
@@ -440,7 +449,7 @@ def replicate_blend(
             rec, atoms = minimise_component(
                 comp.name, comp.data_file, work / "minimise",
                 settings=settings, input_file=comp.forcefield_input,
-                progress=emit)
+                progress=emit, cancel=cancel)
             reports.append(rec.summary())
             if atoms is not None:
                 relaxed[i] = atoms
@@ -462,7 +471,8 @@ def replicate_blend(
     packed_pdb = work / "packed_blend.pdb"
     if not _build_blend_packmol(pdb_files, [c.count for c in components],
                                 packed_pdb, box_edges, tolerance, seed,
-                                packmol_path=packmol_path, regions=regions):
+                                packmol_path=packmol_path, regions=regions,
+                                cancel=cancel):
         raise RuntimeError(
             "packmol failed to produce packed_blend.pdb. "
             f"Check the packmol input/log in {work}.")

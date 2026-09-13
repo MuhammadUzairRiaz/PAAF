@@ -143,7 +143,7 @@ def molecular_formula(smiles: str) -> Dict[str, int]:
             "from SMILES. Install with: conda install -c conda-forge rdkit"
         ) from exc
 
-    from ..polymer_smiles import expand_if_polymer, is_polymer_smiles
+    from ..polymer_smiles import is_polymer_smiles
     smi = smiles
     n_attach = 0
     if is_polymer_smiles(smi):
@@ -883,7 +883,7 @@ def grow_amorphous_cell(
     try:
         setattr(mol, "cell", box)
     except Exception:
-        pass
+        log.debug("grow_amorphous_cell: ignored error", exc_info=True)
 
     # Summed over the chains ACTUALLY grown, because a copolymer chain's mass
     # depends on the sequence that chain happened to get.

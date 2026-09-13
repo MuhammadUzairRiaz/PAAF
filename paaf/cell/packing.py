@@ -118,6 +118,9 @@ def run_cancellable(cmd, *, cwd=None, timeout_s=None, cancel=None,
     import subprocess as _sp
     import time as _time
 
+    if cancel is not None and cancel.is_cancelled():
+        # Already cancelled: do not start a program only to kill it.
+        raise PackCancelled("cancelled before an external program started")
     proc = _sp.Popen(cmd, cwd=cwd, stdin=stdin, stdout=_sp.PIPE,
                      stderr=_sp.PIPE, text=True)
     start = _time.monotonic()

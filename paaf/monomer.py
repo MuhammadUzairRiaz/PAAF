@@ -72,7 +72,7 @@ def _wildcard_neighbour_symbols(poly_smiles: str) -> Optional[Tuple[str, str]]:
                 if hs is not None and ts is not None:
                     return (hs, ts)
     except Exception:
-        pass
+        log.debug("_nb: ignored error", exc_info=True)
 
     # -- RDKit-free fallback -------------------------------------------
     # Handle the common shape `[*]<HEAD>...<TAIL>[*]`. For each `[*]`

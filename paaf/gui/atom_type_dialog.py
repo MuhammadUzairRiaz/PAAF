@@ -31,6 +31,9 @@ from PyQt5.QtWidgets import (
 )
 
 from .page import wrap_tooltip
+from ..logging_utils import get_logger
+
+log = get_logger(__name__)
 
 
 class AtomTypingDialog(QDialog):
@@ -79,7 +82,7 @@ class AtomTypingDialog(QDialog):
             try:
                 self._specs_by_file[s.file] = s
             except Exception:
-                pass
+                log.debug("__init__: ignored error", exc_info=True)
         self._types_by_atom: Dict[int, str] = dict(initial_types or {})
         self._notes: List[str] = []
         self._loaded_atoms = []      # (index, element, neighbors_summary)
@@ -359,7 +362,7 @@ class AtomTypingDialog(QDialog):
                 from ..typers.oplsaa import type_oplsaa
                 return type_oplsaa
             except Exception:
-                pass
+                log.debug("_typer: ignored error", exc_info=True)
         try:
             from ..typers.generic import is_supported, type_generic
         except Exception:
@@ -842,7 +845,8 @@ class AtomTypingDialog(QDialog):
 
         blocked = []
         for idx in atoms:
-            message = check_assignment(self._element_of(idx), tid)
+            message = check_assignment(self._element_of(idx), tid,
+                                       self._element_table())
             if message:
                 blocked.append(f"atom {idx}: {message}")
         if blocked:
@@ -967,7 +971,8 @@ class AtomTypingDialog(QDialog):
         from ..type_guard import check_assignment
 
         ok = [i for i in sorted(targets)
-              if check_assignment(self._element_of(i), tid) is None]
+              if check_assignment(self._element_of(i), tid,
+                                  self._element_table()) is None]
         for idx in ok:
             self._types_by_atom[idx] = tid
         self._refresh_current_column()
@@ -978,6 +983,15 @@ class AtomTypingDialog(QDialog):
                           for k in ok)
         self._alert(f"Assigned {tid} to {len(ok)} equivalent atoms: {shown}")
 
+    def _element_table(self) -> dict:
+        """Type -> element for the force field this dialog is typing for.
+
+        The default table uses the 2024 numbering; OPLS-AA 2008 numbers its
+        types differently (2008 @atom:136 is a hydrogen).
+        """
+        from ..type_guard import elements_for_ff
+        return elements_for_ff(self._ff_key or None)
+
     # ------------------------------------------------------------- 3D view
     def _sync_viewer_types(self) -> None:
         viewer = getattr(self, "viewer3d", None)
@@ -985,7 +999,7 @@ class AtomTypingDialog(QDialog):
             try:
                 viewer.set_types(self._types_by_atom)
             except Exception:                          # pragma: no cover
-                pass
+                log.debug("_sync_viewer_types: ignored error", exc_info=True)
 
     def _on_type_picked(self, _item=None) -> None:
         """A type was clicked. In quick-assign mode that IS the assignment."""
@@ -1001,7 +1015,8 @@ class AtomTypingDialog(QDialog):
         from ..type_guard import check_all
 
         elements = {row[0]: row[3] for row in getattr(self, "_loaded_atoms", [])}
-        problems = check_all(elements, self._types_by_atom)
+        problems = check_all(elements, self._types_by_atom,
+                             self._element_table())
         if problems:
             # check_all returns (atom index, message) pairs, not strings.
             # Joining them directly raised TypeError and took the whole
@@ -1047,7 +1062,7 @@ class AtomTypingDialog(QDialog):
         try:
             viewer.select_index(keys[0])
         except Exception:                              # pragma: no cover
-            pass
+            log.debug("_on_row_selected: ignored error", exc_info=True)
 
     def _on_viewer_atom_clicked(self, index: int) -> None:
         """A click in 3D selects the matching table row, and vice versa.

@@ -206,7 +206,8 @@ def _reactions_apply(ns: argparse.Namespace) -> int:
     from .reaction import ReactionLibrary
     from .xlink_engine import RETYPE_WARNING, apply_library
     lib = ReactionLibrary.load(ns.library)
-    stats = apply_library(ns.system, lib, ns.out, max_events=ns.max_events, cutoff=ns.cutoff)
+    stats = apply_library(ns.system, lib, ns.out, max_events=ns.max_events,
+                          cutoff=ns.cutoff, box=ns.box)
     print(json.dumps(stats.as_dict(), indent=2))
     print(f"Wrote crosslinked system -> {ns.out}")
     if stats.events_applied:
@@ -318,11 +319,14 @@ def main(argv: list[str] | None = None) -> int:
                         help="Apply a learned reaction library to a packed system")
     sp.add_argument("--library", type=Path, required=True)
     sp.add_argument("--system", type=Path, required=True,
-                    help="Packed system (xyz/pdb/mol2)")
+                    help="Packed system (LAMMPS .data, pdb, gro, xyz, mol2)")
     sp.add_argument("--out", type=Path, required=True)
     sp.add_argument("--max-events", type=int, default=100_000)
     sp.add_argument("--cutoff", type=float, default=5.0,
                     help="Reactive-pair distance cutoff, Å")
+    sp.add_argument("--box", type=float, nargs=3, default=None,
+                    metavar=("A", "B", "C"),
+                    help="Periodic box edges, Å (overrides any box in the file)")
     sp.set_defaults(func=_reactions_apply)
 
     # ---------- pack-cell (amorphous cell / blend)

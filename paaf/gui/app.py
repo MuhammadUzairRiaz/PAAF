@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import sys
+from ..logging_utils import get_logger
+
+log = get_logger(__name__)
 
 
 def launch() -> int:
@@ -29,7 +32,7 @@ def launch() -> int:
         from PyQt5.QtCore import Qt as _Qt
         QApplication.setAttribute(_Qt.AA_ShareOpenGLContexts, True)
     except Exception:
-        pass
+        log.debug("launch: ignored error", exc_info=True)
     try:
         from PyQt5 import QtWebEngineWidgets  # noqa: F401
     except Exception as _exc:                              # pragma: no cover
@@ -54,7 +57,7 @@ def launch() -> int:
         if _icon is not None:
             app.setWindowIcon(_icon)
     except Exception:
-        pass
+        log.debug("launch: ignored error", exc_info=True)
     win = MainWindow()
     win.show()
     return app.exec_()

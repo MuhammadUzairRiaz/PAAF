@@ -22,6 +22,9 @@ from PyQt5.QtWidgets import (
 
 from . import tokens as T
 from .page import (Card, button as _btn, caption, page_header, wrap_tooltip)
+from ..logging_utils import get_logger
+
+log = get_logger(__name__)
 
 _COL_NAME, _COL_DATA, _COL_IN, _COL_COPIES = 0, 1, 2, 3
 _COL_LX, _COL_LY, _COL_LZ, _COL_ORIGIN, _COL_BTNS = 4, 5, 6, 7, 8
@@ -165,6 +168,11 @@ class LayeringTab(QWidget):
         # ---- Action ------------------------------------------------------
         act = QHBoxLayout()
         act.addStretch(1)
+        self.cancel_btn = _btn("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._cancel_run)
+        self._cancel_token = None
+        act.addWidget(self.cancel_btn)
         b_pack = _btn("Build layered cell", "primary")
         b_pack.clicked.connect(self._pack)
         act.addWidget(b_pack)
@@ -379,7 +387,7 @@ class LayeringTab(QWidget):
                 if base:
                     return str(Path(base) / proj / "layered")
             except Exception:
-                pass
+                log.debug("default_out_dir: ignored error", exc_info=True)
         return str(Path.home() / "paaf_output" / "layered")
 
     def _browse_out_dir(self) -> None:
@@ -390,6 +398,12 @@ class LayeringTab(QWidget):
             self.out_dir.setText(d)
 
     # ------------------------------------------------------------ build
+    def _cancel_run(self) -> None:
+        if self._cancel_token is not None:
+            self._cancel_token.cancel()
+            self.log.emit("[layering] cancelling …")
+        self.cancel_btn.setEnabled(False)
+
     def _pack(self) -> None:
         from ..layering import build_layered_cell
         try:
@@ -419,11 +433,15 @@ class LayeringTab(QWidget):
                       tolerance=float(self.tol.value()),
                       minimise=MinimiseSettings(enabled=self.do_min.isChecked()))
 
+        from ..cell.packing import CancelToken
+        token = self._cancel_token = CancelToken()
+        self.cancel_btn.setEnabled(True)
+
         # Worker thread: packmol / LAMMPS would otherwise freeze the window.
         def work(progress):
             return build_layered_cell(
                 specs, out_data, progress=lambda m: progress(f"[layering] {m}"),
-                **kwargs)
+                cancel=token, **kwargs)
 
         def done(path):
             self.log.emit(f"[layering] Wrote {path}")
@@ -434,6 +452,10 @@ class LayeringTab(QWidget):
                 + f"\n\nin {out_dir}")
 
         def fail(msg):
+            if token.is_cancelled():
+                self.log.emit("[layering] cancelled; nothing was written to "
+                              f"{out_data.name}")
+                return
             self.log.emit(f"[layering] ERROR: {msg}")
             QMessageBox.critical(self, "Layering",
                                  f"Build failed:\n{msg.split(chr(10) * 2)[0]}")
@@ -442,3 +464,4 @@ class LayeringTab(QWidget):
         self._last_run = run_in_background(self, work, on_done=done, on_fail=fail,
                                            on_progress=self.log.emit,
                                            busy_widget=self.pack_btn)
+        self._last_run.finished.connect(lambda: self.cancel_btn.setEnabled(False))

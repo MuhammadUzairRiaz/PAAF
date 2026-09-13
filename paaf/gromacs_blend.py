@@ -209,6 +209,7 @@ def replicate_gromacs_blend(
     out_dir: Path,
     seed: int = -1,
     try_count: int = 100_000,
+    cancel=None,
 ) -> Tuple[Path, Path]:
     """Pack all components into one box; return (packed .gro, merged .top).
 
@@ -240,7 +241,9 @@ def replicate_gromacs_blend(
             cmd += ["-f", str(current)]
         if seed and seed > 0:
             cmd += ["-seed", str(seed + i)]
-        r = subprocess.run(cmd, cwd=out_dir, capture_output=True, text=True)
+        from .cell.packing import run_cancellable
+        rc, r_out, r_err = run_cancellable(cmd, cwd=out_dir, cancel=cancel)
+        r = subprocess.CompletedProcess(cmd, rc, r_out, r_err)
         if r.returncode != 0 or not target.exists():
             raise RuntimeError(
                 f"gmx insert-molecules failed on component "

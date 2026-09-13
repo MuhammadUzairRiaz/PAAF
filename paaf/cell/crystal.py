@@ -85,9 +85,17 @@ def build_crystal(
                         name=f"{element}{idx + 1}",
                     ))
                     idx += 1
-    # Store the supercell edge as the box; downstream can use for LAMMPS box lines.
     mol = Molecule(atoms=atoms, bonds=[], name=name)
     mol.source_path = None
+    # The supercell box travels with the molecule as ``mol.cell``, the same
+    # attribute pack_cell sets, so downstream writers can emit box lines.
+    from .amorphous import BoxShape
+    sa, sb, sc = nx * a, ny * b, nz * c
+    right = alpha == beta == gamma == 90.0
+    setattr(mol, "cell", BoxShape(
+        shape=("cubic" if right and sa == sb == sc
+               else "orthorhombic" if right else "triclinic"),
+        a=sa, b=sb, c=sc, alpha=alpha, beta=beta, gamma=gamma))
     return mol
 
 

@@ -209,7 +209,14 @@ def _find_candidate(mol: Molecule, template: ReactionTemplate, exclude: set,
     close.sort(key=lambda p: _distance(mol, p[0], p[1], box))
     for i, j in close:
         got = extend({a_site: i, b_site: j})
-        if got is not None:
+        if got is None:
+            continue
+        # Every created bond must be in range, not just the first: a
+        # condensation creates the ester C-O AND the leaving water's O-H.
+        # Returning a mapping whose second bond is far made the caller reject
+        # it and stop the whole template, with closer candidates untried.
+        if all(_distance(mol, got[a], got[b], box) <= cutoff
+               for a, b in pairs):
             return got
     return None
 
@@ -296,9 +303,20 @@ def apply_library(
     output_path: str | Path,
     max_events: int = 1_000_000,
     cutoff: float = 5.0,
+    box: Optional[Sequence[float]] = None,
 ) -> XlinkStats:
-    """Apply every template in `library` to `system_path` and write result."""
+    """Apply every template in `library` to `system_path` and write result.
+
+    Distances use the minimum image when the system has a periodic cell:
+    read from the file (LAMMPS data box, PDB CRYST1, GRO box line) or given
+    as ``box`` (edge lengths, Å), which wins.
+    """
     mol = load_structure(system_path)
+    if box is not None:
+        setattr(mol, "cell", tuple(float(x) for x in box))
+    if getattr(mol, "cell", None) is None:
+        log.info("%s carries no periodic box: distances are not minimum-imaged "
+                 "(pass --box A B C for a periodic cell).", Path(system_path).name)
     log.info("Loaded system %s (%d atoms, %d bonds)", system_path, len(mol.atoms), len(mol.bonds))
     stats = XlinkStats()
     for template in library.templates:

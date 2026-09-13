@@ -267,7 +267,7 @@ def _random_rotation() -> np.ndarray:
 # ============================================================ packmol backend
 def _pack_with_packmol(
     specs: Sequence[PackSpec], mols: Sequence[Molecule], box: BoxShape,
-    tolerance: float = 2.0, seed: int = 12345,
+    tolerance: float = 2.0, seed: int = 12345, cancel=None,
 ) -> Optional[Molecule]:
     exe = shutil.which("packmol")
     if exe is None:
@@ -309,10 +309,16 @@ def _pack_with_packmol(
         ]
     inp.write_text("\n".join(lines) + "\n")
     log.info("Running packmol (%s box)...", box.shape)
+    from .packing import run_cancellable
     with inp.open() as fh:
-        proc = subprocess.run([exe], stdin=fh, capture_output=True, text=True)
-    if proc.returncode != 0 or not out.exists():
-        log.warning("packmol failed:\n%s", proc.stdout + proc.stderr)
+        # Killable: Cancel stops packmol instead of waiting for it.
+        rc, stdout, stderr = run_cancellable([exe], stdin=fh, cancel=cancel)
+    if rc == 173 and out.exists():
+        # "ENDED WITHOUT PERFECT PACKING": packmol still wrote its best layout.
+        log.warning("packmol ended without perfect packing: using its best "
+                    "layout; minimise before dynamics.")
+    elif rc != 0 or not out.exists():
+        log.warning("packmol failed:\n%s", (stdout or "") + (stderr or ""))
         return None
     return load_structure(out, name="packed")
 
@@ -392,6 +398,7 @@ def pack_cell(
     out_path: Optional[str | Path] = None,
     backend: str = "auto",
     seed: int = 12345,
+    cancel=None,
 ) -> Tuple[Molecule, BoxShape]:
     """Pack molecules into a periodic box of any shape.
 
@@ -442,7 +449,7 @@ def pack_cell(
 
     packed: Optional[Molecule] = None
     if backend in ("auto", "packmol"):
-        packed = _pack_with_packmol(specs, mols, box, seed=seed)
+        packed = _pack_with_packmol(specs, mols, box, seed=seed, cancel=cancel)
     if packed is None and backend in ("auto", "mbuild"):
         packed = _pack_with_mbuild(specs, mols, box, seed=seed)
     if packed is None:

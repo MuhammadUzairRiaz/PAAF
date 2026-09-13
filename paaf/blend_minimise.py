@@ -229,7 +229,8 @@ def _longest_bond(data_file: Path,
 def minimise_component(name: str, data_file: Path, work_dir: Path,
                        settings: Optional[MinimiseSettings] = None,
                        input_file: Optional[Path] = None,
-                       progress: Optional[Callable[[str], None]] = None
+                       progress: Optional[Callable[[str], None]] = None,
+                       cancel=None,
                        ) -> Tuple[ComponentMinimisation,
                                   Optional[List[Tuple[int, int, float, float, float]]]]:
     """Relax one component. Returns ``(record, atoms or None)``.
@@ -285,11 +286,17 @@ def minimise_component(name: str, data_file: Path, work_dir: Path,
         dump_name, settings)
 
     emit(f"  {name}: minimising the single chain …")
+    from .cell.packing import PackCancelled, run_cancellable
     try:
-        proc = subprocess.run([str(exe), "-in", rec.input_script.name],
-                              cwd=str(work), capture_output=True, text=True,
-                              timeout=settings.timeout_s)
-    except subprocess.TimeoutExpired:
+        # Killable: Cancel stops LAMMPS instead of waiting for it.
+        cmd = [str(exe), "-in", rec.input_script.name]
+        rc, out, err = run_cancellable(cmd, cwd=str(work),
+                                       timeout_s=settings.timeout_s,
+                                       cancel=cancel)
+        proc = subprocess.CompletedProcess(cmd, rc, out, err)
+    except PackCancelled:
+        raise
+    except TimeoutError:
         rec.message = f"LAMMPS exceeded {settings.timeout_s} s"
         return rec, None
     except Exception as exc:

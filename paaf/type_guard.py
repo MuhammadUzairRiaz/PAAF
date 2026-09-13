@@ -117,7 +117,16 @@ def elements_for_ff(ff_key: Optional[str]) -> Dict[str, str]:
                 from .ff_registry import BUNDLED_MOLTEMPLATE
                 path = BUNDLED_MOLTEMPLATE / ff.bundled_lt
             if path is not None and Path(path).exists():
-                table = type_elements(Path(path))
+                # Own file first, then any library it imports: loplsaa2008.lt
+                # holds only its 33 additions and imports oplsaa2008.lt for
+                # the base types, which were otherwise never checked.
+                table = dict(type_elements(Path(path)))
+                text = Path(path).read_text(errors="replace")
+                for imp in re.findall(r'^\s*import\s+"([^"]+)"', text, re.M):
+                    base = Path(path).parent / imp
+                    if base.exists():
+                        for tid, el in type_elements(base).items():
+                            table.setdefault(tid, el)
                 if table:
                     return table
         except Exception as exc:                          # unknown key etc.

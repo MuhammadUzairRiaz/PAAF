@@ -246,7 +246,12 @@ class BlendTab(QWidget):
         bw.setContentsMargins(T.PAD_PAGE, 0, 0, 0)
         self.pack_btn = _btn("Pack blend", "primary")
         self.pack_btn.clicked.connect(self._pack)
-        self._bar = action_bar("Add at least two components to pack.", [self.pack_btn])
+        self.cancel_btn = _btn("Cancel")
+        self.cancel_btn.setEnabled(False)
+        self.cancel_btn.clicked.connect(self._cancel_run)
+        self._cancel_token = None
+        self._bar = action_bar("Add at least two components to pack.",
+                               [self.cancel_btn, self.pack_btn])
         bw.addWidget(self._bar)
         v.addWidget(bar_wrap)
 
@@ -711,6 +716,24 @@ class BlendTab(QWidget):
                 f"output folder is set and no project folder is available. "
                 f"Set one above, or via File > Project settings.")
 
+    # ------------------------------------------------------------ cancel
+    def _new_cancel_token(self):
+        """A fresh token for one run; Cancel is live until the run ends."""
+        from ..cell.packing import CancelToken
+        self._cancel_token = CancelToken()
+        self.cancel_btn.setEnabled(True)
+        return self._cancel_token
+
+    def _cancel_run(self) -> None:
+        if self._cancel_token is not None:
+            self._cancel_token.cancel()
+            self.log.emit("[blend] cancelling …")
+        self.cancel_btn.setEnabled(False)
+
+    def _track_run(self, thread) -> None:
+        self._last_run = thread
+        thread.finished.connect(lambda: self.cancel_btn.setEnabled(False))
+
     def _pack_gromacs(self, out_dir: Path) -> None:
         """The GROMACS route: .gro + .top per row, gmx does the packing."""
         from ..gromacs_blend import (GromacsBlendComponent,
@@ -745,8 +768,11 @@ class BlendTab(QWidget):
         box = (self.a.value(), self.b.value(), self.c.value())
         seed = int(self.seed.value())
 
+        token = self._new_cancel_token()
+
         def work(_progress):
-            return replicate_gromacs_blend(comps, box, out_dir, seed=seed)
+            return replicate_gromacs_blend(comps, box, out_dir, seed=seed,
+                                           cancel=token)
 
         def done(result):
             gro, top = result
@@ -757,12 +783,16 @@ class BlendTab(QWidget):
                 f"Run it with grompp/mdrun; equilibrate (NPT) before measuring.")
 
         def fail(msg):
+            if token.is_cancelled():
+                self.log.emit("[blend] cancelled; partial files may remain in "
+                              f"{out_dir}")
+                return
             self.log.emit(f"[blend] FAILED: {msg}")
             QMessageBox.critical(self, "Blend", msg.split("\n\n")[0])
 
         from .background import run_in_background
-        self._last_run = run_in_background(self, work, on_done=done, on_fail=fail,
-                                           busy_widget=self.pack_btn)
+        self._track_run(run_in_background(self, work, on_done=done, on_fail=fail,
+                                          busy_widget=self.pack_btn))
 
     def _pack(self) -> None:
         if self._is_gromacs():
@@ -807,12 +837,14 @@ class BlendTab(QWidget):
 
         # Runs on a worker thread: packmol and per-component LAMMPS
         # minimisation can take minutes and would otherwise freeze the window.
+        token = self._new_cancel_token()
+
         def work(progress):
             return replicate_blend(
                 components, box_edges=box, out_data_file=out_data,
                 out_input_file=out_in, seed=seed, tolerance=tol,
                 minimise=minimise, max_bond_length=3.0,
-                progress=lambda m: progress(f"[blend] {m}"))
+                progress=lambda m: progress(f"[blend] {m}"), cancel=token)
 
         def done(path):
             self.log.emit(f"[blend] Wrote {path}")
@@ -824,13 +856,17 @@ class BlendTab(QWidget):
                 + f"\n\nin {out_dir}")
 
         def fail(msg):
+            if token.is_cancelled():
+                self.log.emit("[blend] cancelled; nothing was written to "
+                              f"{out_data.name}")
+                return
             self.log.emit(f"[blend] ERROR: {msg}")
             QMessageBox.critical(self, "Blend", f"Pack failed:\n{msg.split(chr(10) * 2)[0]}")
 
         from .background import run_in_background
-        self._last_run = run_in_background(self, work, on_done=done, on_fail=fail,
-                                           on_progress=self.log.emit,
-                                           busy_widget=self.pack_btn)
+        self._track_run(run_in_background(self, work, on_done=done, on_fail=fail,
+                                          on_progress=self.log.emit,
+                                          busy_widget=self.pack_btn))
 
 
 # ---------------------------------------------------------------- naming

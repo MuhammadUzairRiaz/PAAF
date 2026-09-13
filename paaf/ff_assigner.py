@@ -51,8 +51,13 @@ def assign(
     """
     strategy = ff.atom_typer
     if manual_types:
+        # Check elements against the SELECTED library's numbering: OPLS-AA
+        # 2008 @atom:136 is a hydrogen, the 2024 table calls it a carbon.
+        from .type_guard import elements_for_ff
+        _elements = elements_for_ff(ff.key)
         expanded = expand_manual_types(
-            mol, manual_types, monomer=monomer, n_units=n_units)
+            mol, manual_types, monomer=monomer, n_units=n_units,
+            type_elements=_elements)
         # Nothing placed? Try matching on chemical environment before giving
         # up. The dialog seeds every atom from the automatic typer and the
         # user overrides only what it got wrong, so the map is COMPLETE --
@@ -63,7 +68,8 @@ def assign(
             from .typing_context import split_by_role
 
             expanded = types_by_environment(
-                mol, monomer, split_by_role(manual_types))
+                mol, monomer, split_by_role(manual_types),
+                type_elements=_elements)
         if not expanded:
             raise RuntimeError(
                 f"You assigned {len(manual_types)} atom types, but none of "
@@ -147,7 +153,9 @@ def assign(
 # ==================================================================== helpers
 def expand_manual_types(mol: Molecule, manual_types: Dict[int, str],
                         *, monomer: Optional[object] = None,
-                        n_units: int = 0) -> Dict[int, str]:
+                        n_units: int = 0,
+                        type_elements: Optional[Dict[str, str]] = None
+                        ) -> Dict[int, str]:
     """Place a monomer's manual types onto every unit of the chain.
 
     ``manual_types`` is keyed by **monomer** atom index — that is what the
@@ -207,6 +215,7 @@ def expand_manual_types(mol: Molecule, manual_types: Dict[int, str],
         return {}
 
     return expand_by_provenance(mol, repeat_types, provenance,
+                                type_elements=type_elements,
                                 head_types=head_types, tail_types=tail_types,
                                 cap_types=cap_types, n_units=n_units)
 

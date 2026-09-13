@@ -158,11 +158,15 @@ def write_pushoff_inputs(molecule: Molecule, dims, work_dir: Path,
     data.write_text("\n".join(lines) + "\n")
 
     inp = work_dir / "pushoff.in"
+    from .soft_stage import soft_stage_lines
     script = ["units real", "atom_style molecular", "boundary p p p",
               f"read_data {data.name}",
               "",
-              f"pair_style soft {cutoff}",
-              "pair_coeff * * 0.0",
+              "# Ramp the repulsion from almost nothing to a full push while",
+              "# nve/limit caps the per-step displacement — the standard",
+              "# preparation-stage push-off (Kremer & Grest).",
+              *soft_stage_lines(cutoff, 1.0, 100.0, nve_limit=0.05,
+                                limit_fix="integrate", pad=False),
               "# 1-2 excluded (the bond holds them). 1-3 excluded TOO, and",
               "# held by explicit angle terms instead: with 1-3 repulsion on",
               "# and no angles, the two hydrogens of every CH2 pushed each",
@@ -177,12 +181,6 @@ def write_pushoff_inputs(molecule: Molecule, dims, work_dir: Path,
     script += [f"angle_coeff {n + 1} 60.0 {a0:.2f}"
                for n, a0 in enumerate(theta0)]
     script += ["",
-               "# Ramp the repulsion from almost nothing to a full push while",
-               "# nve/limit caps the per-step displacement — the standard",
-               "# preparation-stage push-off (Kremer & Grest).",
-               "variable prefactor equal ramp(1.0,100.0)",
-               "fix push all adapt 1 pair soft a * * v_prefactor",
-               "fix integrate all nve/limit 0.05",
                f"fix cool all langevin 300.0 300.0 100.0 {seed}",
                "",
                "thermo 500",

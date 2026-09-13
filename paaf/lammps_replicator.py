@@ -297,12 +297,26 @@ def _pack_with_packmol(single_pdb: Path, n: int, box_edges: Tuple[float, float, 
         )
     except OSError:
         pass
+    if proc.returncode == PACKMOL_IMPERFECT and out_pdb.exists():
+        # packmol's "ENDED WITHOUT PERFECT PACKING": it still writes its best
+        # layout, which it calls a reasonable starting configuration. Long
+        # rigid chains in a tight box end here routinely; refusing the build
+        # threw away a usable cell. Minimisation clears the few close pairs.
+        log.warning("packmol ended without perfect packing (rc=%d): using its "
+                    "best layout. A few contacts may be closer than the %s Å "
+                    "tolerance; minimise before dynamics.",
+                    proc.returncode, tolerance)
+        return True
     if proc.returncode != 0 or not out_pdb.exists():
         tail = "\n".join((proc.stdout or "").splitlines()[-30:])
         log.warning("packmol failed (rc=%d). Last lines:\n%s",
                     proc.returncode, tail)
         return False
     return True
+
+
+#: packmol's exit code for "ENDED WITHOUT PERFECT PACKING" (output still written).
+PACKMOL_IMPERFECT = 173
 
 
 def _pack_grid(single_pdb: Path, n: int, box_edges: Tuple[float, float, float],
@@ -416,6 +430,7 @@ def replicate_single_chain(
     tolerance: float = 2.0,
     packmol_path: Optional[str] = None,
     cancel=None,
+    use_packmol: bool = True,
 ) -> Path:
     """Given a single-chain LAMMPS data file, produce packed_box.data
     containing `n_chains` copies packed inside `box_edges` (Å).
@@ -434,11 +449,17 @@ def replicate_single_chain(
     _write_pdb_from_data(single_data_file, single_pdb)
 
     packed_pdb = work / "packed.pdb"
-    _used_packmol = _pack_with_packmol(
-        single_pdb, n_chains, box_edges, packed_pdb,
-        tolerance=tolerance, seed=seed, packmol_path=packmol_path,
-        cancel=cancel)
-    if not _used_packmol:
+    _used_packmol = False
+    if use_packmol:
+        _used_packmol = _pack_with_packmol(
+            single_pdb, n_chains, box_edges, packed_pdb,
+            tolerance=tolerance, seed=seed, packmol_path=packmol_path,
+            cancel=cancel)
+    else:
+        log.info("packmol switched off (box.packmol = false): packing with "
+                 "the deterministic grid packer.")
+        _pack_grid(single_pdb, n_chains, box_edges, packed_pdb, seed=seed)
+    if use_packmol and not _used_packmol:
         # If a packmol binary WAS found but the run failed, that's a hard
         # error the user needs to see (bad tolerance, tiny box, corrupt PDB,
         # unrecognised keyword) — surface the tail of packmol.log so they
@@ -465,7 +486,7 @@ def replicate_single_chain(
         log.warning("and set the path on the Box page.")
         log.warning("=" * 70)
         _pack_grid(single_pdb, n_chains, box_edges, packed_pdb, seed=seed)
-    else:
+    elif use_packmol:
         log.info("PACKED via packmol (random layout).")
 
     coords = _read_xyz_or_pdb_coords(packed_pdb)

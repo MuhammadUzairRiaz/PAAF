@@ -37,6 +37,9 @@ from PyQt5.QtWidgets import (
 
 from . import tokens as T
 from .page import stat_row
+from ..logging_utils import get_logger
+
+log = get_logger(__name__)
 
 
 # ===================================================================== worker
@@ -1544,7 +1547,7 @@ class ReactionSchemeTab(QWidget):
                 if dl:
                     self.rx_dl_lib.setText(dl)
         except Exception:
-            pass
+            log.debug("set_settings_provider: ignored error", exc_info=True)
 
     def _pipeline_settings(self) -> dict:
         """What the MAIN Force-field / project pages currently hold.

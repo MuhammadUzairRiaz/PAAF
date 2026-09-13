@@ -22,6 +22,9 @@ from PyQt5.QtWidgets import (
 
 from . import tokens as T
 from .page import Card, button as _btn, caption, page_header, wrap_tooltip
+from ..logging_utils import get_logger
+
+log = get_logger(__name__)
 
 _COL_NAME, _COL_SMILES, _COL_DP, _COL_CHAINS, _COL_BTNS = 0, 1, 2, 3, 4
 
@@ -352,7 +355,7 @@ class CGTab(QWidget):
                     return str(Path(cfg["out_dir"])
                                / (cfg.get("project") or "polymer") / "cg")
             except Exception:
-                pass
+                log.debug("default_out_dir: ignored error", exc_info=True)
         return str(Path.home() / "paaf_output" / "cg")
 
     def _browse_out(self) -> None:

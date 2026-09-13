@@ -172,7 +172,7 @@ class MainWindow(QMainWindow):
             if _icon is not None:
                 self.setWindowIcon(_icon)
         except Exception:
-            pass
+            log.debug("__init__: ignored error", exc_info=True)
         self.resize(1360, 860)
         self.setMinimumSize(900, 600)   # readable minimum; scroll areas do the rest
         self._worker: Optional[Worker] = None
@@ -500,7 +500,7 @@ class MainWindow(QMainWindow):
             self.sidebar.mark_done(row, True)
             self.sidebar.set_step_result(row, self._step_result(row))
         except Exception:
-            pass
+            log.debug("_advance_step: ignored error", exc_info=True)
         self.sidebar.setCurrentRow(PIPELINE_INDICES[step + 1])
 
     def _step_result(self, row: int) -> str:
@@ -521,7 +521,7 @@ class MainWindow(QMainWindow):
             if name == "Export":
                 return self.engine_combo.currentText()
         except Exception:
-            pass
+            log.debug("_step_result: ignored error", exc_info=True)
         return ""
 
     def _on_nav(self, row: int) -> None:
@@ -546,7 +546,7 @@ class MainWindow(QMainWindow):
             try:
                 self._refresh_copolymer_monomers()
             except Exception:
-                pass
+                log.debug("_on_nav: ignored error", exc_info=True)
 
     def _toggle_console(self, checked: bool):
         self.console.setVisible(checked)
@@ -1433,7 +1433,7 @@ class MainWindow(QMainWindow):
             if labels:
                 labels[-1].setText(str(value))
         except Exception:
-            pass
+            log.debug("_set_stat: ignored error", exc_info=True)
 
     def _refresh_ff_summary(self) -> None:
         """Keep the Force-field page's Assignment summary card in step."""

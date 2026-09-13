@@ -142,6 +142,7 @@ def build_layered_cell(
     packmol_path: Optional[str] = None,
     minimise: Optional[object] = None,
     progress: Optional[Callable[[str], None]] = None,
+    cancel=None,
 ) -> Path:
     """Pack every layer into its own region and write ONE LAMMPS data file.
 
@@ -166,4 +167,4 @@ def build_layered_cell(
     return replicate_blend(
         comps, cell, Path(out_data_file), out_input_file=out_input_file,
         seed=seed, tolerance=tolerance, packmol_path=packmol_path,
-        minimise=minimise, progress=progress, regions=regions)
+        minimise=minimise, progress=progress, regions=regions, cancel=cancel)

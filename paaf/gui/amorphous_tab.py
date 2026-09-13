@@ -40,6 +40,9 @@ from PyQt5.QtWidgets import (
 
 from . import tokens as T
 from .page import Card, badge, button, caption, label, stat_row, wrap_tooltip
+from ..logging_utils import get_logger
+
+log = get_logger(__name__)
 
 
 # ===================================================================== worker
@@ -517,7 +520,7 @@ class ComponentRow(QWidget):
                 if canon(smi) == key:
                     return model
         except Exception:
-            pass
+            log.debug("canon: ignored error", exc_info=True)
         return ""
 
 
@@ -1856,7 +1859,7 @@ class AmorphousTab(QWidget):
             if inherited and not self.dl_lib.text().strip():
                 self.dl_lib.setText(inherited)
         except Exception:
-            pass
+            log.debug("set_settings_provider: ignored error", exc_info=True)
         self._refresh_files()
 
     def _pipeline_settings(self) -> dict:

@@ -56,4 +56,4 @@ class QtLogHandler(logging.Handler):
         try:
             self._bridge.message.emit(self.format(record))
         except Exception:
-            pass
+            self.handleError(record)

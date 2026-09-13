@@ -349,12 +349,18 @@ def _run_dlfield(structure: Path, work_dir: Path, ff_key: str,
 
 
 
-def data_file_charges(data_path: Path) -> Optional[Tuple[int, float, float]]:
+def data_file_charges(data_path: Path, charges_file: Optional[Path] = None
+                      ) -> Optional[Tuple[int, float, float]]:
     """``(n_atoms, total_charge, max_abs_charge)`` from a LAMMPS data file.
 
     ``atom_style full`` puts the charge in column 4 of the Atoms section. A
     cell whose charges are all zero runs perfectly happily and gives silently
     wrong electrostatics, so it is worth checking rather than assuming.
+
+    ``charges_file`` is moltemplate's ``system.in.charges``: OPLS-AA through
+    moltemplate leaves the data column at zero and sets charges by type
+    there, so its ``set type N charge q`` lines override the column — as they
+    do when the run script includes the file after ``read_data``.
 
     Returns ``None`` when the file has no ``Atoms`` section to read.
     """
@@ -362,6 +368,16 @@ def data_file_charges(data_path: Path) -> Optional[Tuple[int, float, float]]:
         lines = Path(data_path).read_text().splitlines()
     except OSError:
         return None
+    by_type: Dict[str, float] = {}
+    if charges_file is not None:
+        import re as _re
+        try:
+            for ln in Path(charges_file).read_text(errors="replace").splitlines():
+                m = _re.match(r"^\s*set\s+type\s+(\S+)\s+charge\s+([-\d.eE+]+)", ln)
+                if m:
+                    by_type[m.group(1)] = float(m.group(2))
+        except OSError:
+            by_type = {}
     start = None
     for i, line in enumerate(lines):
         if line.strip().startswith("Atoms"):
@@ -382,7 +398,7 @@ def data_file_charges(data_path: Path) -> Optional[Tuple[int, float, float]]:
         if len(parts) < 7:
             break                          # next section header
         try:
-            q = float(parts[3])
+            q = by_type.get(parts[2], float(parts[3]))
         except ValueError:
             break
         total += q
@@ -835,22 +851,36 @@ def export_cell(
                 # fall back to PAAF's table if there is none.
                 found = _find_dlfield_styles_file(folder / "_typing")
                 parsed = {}
+                coeff_lines: List[str] = []
                 if found is not None:
                     # DL_FIELD's lammps.in carries units/read_data/pair_coeff
                     # of its own, so it must NOT be included as an init file
-                    # (double read_data, coefficients lost after the soft
-                    # stage). Take only its style lines.
-                    from .relax import extract_style_lines
+                    # (double read_data). Take its style lines, and carry its
+                    # pair coefficients separately: DL_FIELD's data file has
+                    # no Pair Coeffs section, so without them LAMMPS stops
+                    # with "All pair coeffs are not set".
+                    from .relax import extract_coeff_lines, extract_style_lines
                     try:
                         for ln in extract_style_lines(found):
                             tok = ln.split(None, 1)
                             if len(tok) == 2:
                                 parsed[tok[0]] = tok[1].strip()
+                        coeff_lines = extract_coeff_lines(found)
                     except OSError as exc:
                         emit(f"WARNING: could not read {found.name}: {exc}")
                 if parsed:
                     styles = parsed
                     src = f"DL_FIELD's own {found.name}"
+                    if coeff_lines:
+                        try:
+                            (folder / "relax").mkdir(parents=True, exist_ok=True)
+                            (folder / "relax" / "dlf_coeffs.in").write_text(
+                                f"# pair coefficients from {found.name}\n"
+                                + "\n".join(coeff_lines) + "\n")
+                            settings_f = "dlf_coeffs.in"
+                        except OSError as exc:
+                            emit(f"WARNING: could not write dlf_coeffs.in "
+                                 f"({exc}); the relax deck may not run.")
                 else:
                     # Read the sub-styles out of the data file rather than
                     # look them up: DL_FIELD names each one in column 2 of

@@ -124,10 +124,12 @@ def _rewrite_top_count(top_path: Path, new_count: int) -> None:
     log.info("Rewrote %s: molecule count → %d", top_path, new_count)
 
 
-def _run(cmd: list, cwd: Path) -> subprocess.CompletedProcess:
-    """Run a subprocess with combined stdout/stderr captured, log it."""
+def _run(cmd: list, cwd: Path, cancel=None) -> subprocess.CompletedProcess:
+    """Run a subprocess with stdout/stderr captured, log it. Killable."""
+    from .cell.packing import run_cancellable
     log.info("$ %s   (cwd=%s)", " ".join(cmd), cwd)
-    p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True)
+    rc, out, err = run_cancellable(cmd, cwd=cwd, cancel=cancel)
+    p = subprocess.CompletedProcess(cmd, rc, out, err)
     if p.returncode != 0:
         log.warning("Command failed (rc=%d). Last stderr:\n%s",
                     p.returncode, "\n".join((p.stderr or "").splitlines()[-30:]))
@@ -135,7 +137,8 @@ def _run(cmd: list, cwd: Path) -> subprocess.CompletedProcess:
 
 
 def energy_minimise_single_chain(gro_path: Path, top_path: Path,
-                                 gmx: Optional[str] = None) -> Path:
+                                 gmx: Optional[str] = None,
+                                 cancel=None) -> Path:
     """Run one steepest-descent minimisation on ``gro_path`` using its
     matching ``top_path``. Returns the path to the minimised .gro."""
     gmx = gmx or _find_gmx()
@@ -151,10 +154,10 @@ def energy_minimise_single_chain(gro_path: Path, top_path: Path,
               "-p",   str(top_path.name),
               "-o",   str(tpr.name),
               "-maxwarn", "3"],
-             cwd=workdir)
+             cwd=workdir, cancel=cancel)
     if r.returncode != 0:
         raise RuntimeError(f"gmx grompp failed: rc={r.returncode}\n{r.stderr[-600:]}")
-    r = _run([gmx, "mdrun", "-deffnm", "enmin"], cwd=workdir)
+    r = _run([gmx, "mdrun", "-deffnm", "enmin"], cwd=workdir, cancel=cancel)
     if r.returncode != 0:
         raise RuntimeError(f"gmx mdrun failed: rc={r.returncode}\n{r.stderr[-600:]}")
     return workdir / "enmin.gro"
@@ -330,6 +333,7 @@ def pack_with_gmx_insert(
     pre_minimise: bool = True,
     gmx: Optional[str] = None,
     out_name: str = "packed_box.gro",
+    cancel=None,
 ) -> GmxPackResult:
     """Fill a box with N copies of ``single_gro`` via ``gmx insert-molecules``.
 
@@ -369,7 +373,8 @@ def pack_with_gmx_insert(
     minimised = False
     if pre_minimise and top_file.exists():
         try:
-            single_gro = energy_minimise_single_chain(single_gro, top_file, gmx=gmx)
+            single_gro = energy_minimise_single_chain(single_gro, top_file, gmx=gmx,
+                                                      cancel=cancel)
             minimised = True
             log.info("Single chain minimised → %s", single_gro)
         except Exception as e:
@@ -410,7 +415,7 @@ def pack_with_gmx_insert(
               "-box",  f"{a}", f"{b}", f"{c}",
               "-try",  str(try_count),
               "-o",    str(out_gro.name)],
-             cwd=workdir)
+             cwd=workdir, cancel=cancel)
     if r.returncode != 0 or not out_gro.exists():
         raise RuntimeError(
             f"gmx insert-molecules failed (rc={r.returncode}):\n{r.stderr[-800:]}")

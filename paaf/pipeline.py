@@ -663,6 +663,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                         packmol_path=getattr(cfg.box, "packmol_path", "") or None,
                         seed=int(getattr(cfg.box, "packmol_seed", -1)),
                         tolerance=float(getattr(cfg.box, "packmol_tolerance", 2.0)),
+                        use_packmol=bool(getattr(cfg.box, "packmol", True)),
                         cancel=cancel,
                     )
                     _p(f"[replicator] Wrote {packed_data}")
@@ -706,6 +707,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                             atom_limit=(gmx_target_atoms if gmx_target_atoms > 0 else None),
                             try_count=int(getattr(cfg.box, "gmx_try_count", 100000)),
                             pre_minimise=bool(getattr(cfg.box, "gmx_pre_minimise", True)),
+                            cancel=cancel,
                         )
                         _p(f"[gmx-pack] Inserted {gmx_result.n_inserted} copies → "
                            f"{gmx_result.filled_gro}")
@@ -717,8 +719,10 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                             shutil.copy2(gmx_result.filled_gro, packed_top)
                             dlfield_result.outputs = sorted(
                                 set(list(dlfield_result.outputs) + [packed_top]), key=str)
-                        except Exception:
-                            pass
+                        except OSError as _cp_err:
+                            _p(f"WARNING: could not copy {gmx_result.filled_gro} to "
+                               f"{packed_top} ({_cp_err}); use the file in "
+                               f"{Path(gmx_result.filled_gro).parent}")
                         # ...and its TOPOLOGY with it. Hoisting the coordinates
                         # alone is what made a correctly packed box look broken.
                         #
@@ -752,8 +756,10 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                                 for inc in sorted(src_dir.glob("*.itp")):
                                     try:
                                         shutil.copy2(inc, out_dir / inc.name)
-                                    except Exception:
-                                        pass
+                                    except OSError as _cp_err:
+                                        _p(f"WARNING: could not copy {inc.name} into "
+                                           f"{out_dir} ({_cp_err}); grompp there will "
+                                           f"not find this #include")
                                 dlfield_result.outputs = sorted(
                                     set(list(dlfield_result.outputs)
                                         + [packed_topol]), key=str)
@@ -853,6 +859,14 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                     from .ua_hybrid import patch_data_masses
                     _nm = patch_data_masses(Path(data_file), _hyb.bead_masses)
                     _p(f"[united-atom] bead masses written for {_nm} type(s) in {Path(data_file).name}")
+                    if not ff.united_atom:
+                        # UA beads next to all-atom groups: the two libraries'
+                        # charges do not add up to a neutral molecule.
+                        from .ua_hybrid import rebalance_hybrid_charges
+                        rebalance_hybrid_charges(
+                            Path(data_file),
+                            Path(data_file).with_name("system.in.charges"),
+                            list(_hyb.bead_masses), _p)
                 if _pack_after_mt and data_file and Path(data_file).exists():
                     _stage(7, f"Packing {_n_chains_mt} chains into the box")
                     _p(f"[replicator] Packing {_n_chains_mt} chains into box "
@@ -866,6 +880,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                         packmol_path=getattr(cfg.box, "packmol_path", "") or None,
                         seed=int(getattr(cfg.box, "packmol_seed", -1)),
                         tolerance=float(getattr(cfg.box, "packmol_tolerance", 2.0)),
+                        use_packmol=bool(getattr(cfg.box, "packmol", True)),
                         cancel=cancel,
                     )
                     _p(f"[replicator] Wrote {packed_data} "
@@ -932,7 +947,10 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
             continue
         try:
             from .cell.cell_export import data_file_charges
-            _q = data_file_charges(_cand)
+            # Moltemplate sets OPLS charges by type in system.in.charges and
+            # leaves the data column at zero; the run script includes it.
+            _chg = out_dir / "system.in.charges"
+            _q = data_file_charges(_cand, _chg if _chg.exists() else None)
         except Exception as exc:
             _p(f"WARNING: could not read charges from {_cand.name} ({exc})")
             break

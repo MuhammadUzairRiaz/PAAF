@@ -233,6 +233,13 @@ def _fix_line(ensemble: str, tag: str, T: float, tdamp: float, P: float, pdamp: 
     raise ValueError(f"Unknown ensemble {ensemble!r}")
 
 
+def _fix_ids(fix_text: str) -> List[str]:
+    """IDs of the ``fix`` commands in ``fix_text``, last defined first."""
+    ids = [ln.split()[1] for ln in fix_text.splitlines()
+           if ln.split()[:1] == ["fix"] and len(ln.split()) > 1]
+    return list(reversed(ids))
+
+
 def write_lammps_input(
     out_dir: str | Path,
     data_file: str = "system.data",
@@ -326,9 +333,11 @@ def write_lammps_input(
                             barostat, pressure_coupling, thermostat, seed)
         lines.append(fix_nvt)
         lines.append(f"run             {nvt_steps}")
-        # Unfix all NVT-related tags
-        for tag in ("EQ", "EQ_nve"):
-            lines.append(f"unfix           {tag}   # (harmless if not defined)")
+        # Unfix exactly the fixes defined above: LAMMPS aborts on an unfix
+        # of an ID that does not exist ("Could not find fix ID ... to
+        # delete"), which ended every run after its last step.
+        for tag in _fix_ids(fix_nvt):
+            lines.append(f"unfix           {tag}")
         lines.append("reset_timestep  0")
         lines.append("")
 
@@ -345,9 +354,8 @@ def write_lammps_input(
                              barostat, pressure_coupling, thermostat, seed)
         lines.append(fix_line)
         lines.append(f"run             {steps}")
-        # Unfix everything defensively
-        for tag in ("RELAX", "RELAX_nve"):
-            lines.append(f"unfix           {tag}   # (harmless if not defined)")
+        for tag in _fix_ids(fix_line):
+            lines.append(f"unfix           {tag}")
 
     lines.append("")
     lines.append("write_data      final.data pair ij")

@@ -483,6 +483,126 @@ def implicit_ua_library(primary_ff, chain: Molecule) -> Optional[str]:
     return None
 
 
+def rebalance_hybrid_charges(data_file: Path, charges_file: Optional[Path],
+                             bead_types: Sequence[str], say=None,
+                             tol: float = 1e-3) -> Optional[float]:
+    """Neutralise each molecule of a UA/AA hybrid, spreading the residual
+    over the all-atom atoms bonded to united-atom beads.
+
+    Why it is needed: a bead takes the UA library's charge while its
+    all-atom neighbours keep charges designed together with explicit
+    hydrogens (ether O -0.40 with CH2 +0.14 and 2 H +0.03). The mixture
+    carries a net charge that neither library intended.
+
+    Moltemplate assigns charges by type (``set type N charge q`` in
+    ``system.in.charges``), and one type is shared by atoms that need
+    different corrections, so the corrected charges are written per atom
+    into the data file and the by-type lines are commented out — otherwise
+    including ``system.in.charges`` after ``read_data`` would undo them.
+
+    Returns the largest correction applied to a molecule (e), or ``None``
+    when nothing needed changing.
+    """
+    say = say or (lambda s: None)
+    data_file = Path(data_file)
+    if not bead_types or not data_file.exists():
+        return None
+    lines = data_file.read_text(errors="replace").splitlines()
+
+    def section(name):
+        for k, ln in enumerate(lines):
+            if ln.split("#", 1)[0].strip() == name:
+                start = k + 1
+                while start < len(lines) and not lines[start].strip():
+                    start += 1
+                end = start
+                while end < len(lines) and lines[end].strip():
+                    end += 1
+                return start, end
+        return None
+
+    masses, atoms_sec, bonds_sec = section("Masses"), section("Atoms"), section("Bonds")
+    if masses is None or atoms_sec is None:
+        return None
+    names = [str(b) for b in bead_types]
+    bead_type_ids = set()
+    for ln in lines[masses[0]:masses[1]]:
+        if "#" not in ln:
+            continue
+        comment = ln.split("#", 1)[1].strip()
+        if any(comment == n or (comment.startswith(n) and comment[len(n)] in "_~ ")
+               for n in names):
+            bead_type_ids.add(ln.split()[0])
+    if not bead_type_ids:
+        return None
+
+    type_q: Dict[str, float] = {}
+    if charges_file is not None and Path(charges_file).exists():
+        for ln in Path(charges_file).read_text(errors="replace").splitlines():
+            m = re.match(r"^\s*set\s+type\s+(\S+)\s+charge\s+([-\d.eE+]+)", ln)
+            if m:
+                type_q[m.group(1)] = float(m.group(2))
+
+    rows = []                                   # (line index, tokens)
+    for k in range(*atoms_sec):
+        toks = lines[k].split("#", 1)[0].split()
+        if len(toks) < 7:                       # needs atom_style full
+            return None
+        rows.append((k, toks))
+    q = {t[0]: type_q.get(t[2], float(t[3])) for _k, t in rows}
+    mol_of = {t[0]: t[1] for _k, t in rows}
+    is_bead = {t[0]: t[2] in bead_type_ids for _k, t in rows}
+    nbrs: Dict[str, List[str]] = {a: [] for a in q}
+    if bonds_sec is not None:
+        for k in range(*bonds_sec):
+            toks = lines[k].split()
+            if len(toks) >= 4 and toks[2] in nbrs and toks[3] in nbrs:
+                nbrs[toks[2]].append(toks[3])
+                nbrs[toks[3]].append(toks[2])
+
+    by_mol: Dict[str, List[str]] = {}
+    for a, m in mol_of.items():
+        by_mol.setdefault(m, []).append(a)
+    worst = 0.0
+    fixed_mols = 0
+    for m, members in by_mol.items():
+        if not any(is_bead[a] for a in members):
+            continue
+        net = sum(q[a] for a in members)
+        if abs(net) <= tol:
+            continue
+        targets = [a for a in members if not is_bead[a]
+                   and any(is_bead[b] for b in nbrs[a])]
+        if not targets:
+            targets = [a for a in members if is_bead[a]]
+        for a in targets:
+            q[a] -= net / len(targets)
+        worst = max(worst, abs(net))
+        fixed_mols += 1
+
+    # Write every atom's charge explicitly (type charges folded in).
+    for k, toks in rows:
+        toks = list(toks)
+        toks[3] = f"{q[toks[0]]:.6f}"
+        comment = lines[k].split("#", 1)[1] if "#" in lines[k] else None
+        lines[k] = " ".join(toks) + (f"  #{comment}" if comment else "")
+    data_file.write_text("\n".join(lines) + "\n")
+    if charges_file is not None and Path(charges_file).exists() and type_q:
+        text = Path(charges_file).read_text(errors="replace").splitlines()
+        Path(charges_file).write_text("\n".join(
+            (f"# PAAF: charges are per atom in {data_file.name} "
+             f"(UA/AA neutralised): {ln}")
+            if re.match(r"^\s*set\s+type\s", ln) else ln for ln in text) + "\n")
+    if fixed_mols:
+        say(f"[united-atom] neutralised {fixed_mols} molecule(s): residual up "
+            f"to {worst:+.4f} e spread over the all-atom neighbours of beads; "
+            f"charges now written per atom in {data_file.name}")
+        log.info("UA/AA charge rebalance: %d molecule(s), max |q| %.4f",
+                 fixed_mols, worst)
+        return worst
+    return None
+
+
 def patch_data_masses(data_file: Path, bead_masses: Dict[str, float]) -> int:
     """Set bead masses in a moltemplate ``system.data`` (Masses lines carry
     ``# <type>_<equivalence>`` comments, which is how types are recognised).

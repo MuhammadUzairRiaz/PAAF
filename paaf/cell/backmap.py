@@ -570,7 +570,7 @@ def backmap_cell(result, specs: Sequence, *, tacticity: str = "isotactic",
     try:
         setattr(cell, "cell", result.box)
     except Exception:
-        pass
+        log.debug("template_for: ignored error", exc_info=True)
 
     # Unthreading runs UNCONDITIONALLY, before the push-off gate. It is the
     # step that decides whether the cell can be typed at all — measured on a
