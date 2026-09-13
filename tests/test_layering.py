@@ -91,7 +91,9 @@ def test_regions_reach_the_packmol_input(tmp_path, monkeypatch):
 
     # No packmol here — stand in a no-op executable; the input file the
     # packer writes BEFORE running it is what carries the regions.
-    monkeypatch.setattr(br, "_find_packmol", lambda explicit=None: "/bin/true")
+    import shutil
+    true_exe = shutil.which("true") or "/usr/bin/true"     # /bin/true is absent on macOS
+    monkeypatch.setattr(br, "_find_packmol", lambda explicit=None: true_exe)
     pdbs = []
     for i in range(2):
         p = tmp_path / f"c{i}.pdb"
@@ -106,5 +108,7 @@ def test_regions_reach_the_packmol_input(tmp_path, monkeypatch):
                                   (0, 0, 25, 40, 40, 55)])
     text = (tmp_path / "pack_blend.inp").read_text()
     print(f"\n{text}")
-    assert "inside box 0.0000 0.0000 0.0000 40.0000 40.0000 20.0000" in text
-    assert "inside box 0.0000 0.0000 25.0000 40.0000 40.0000 55.0000" in text
+    # Faces on the periodic boundary are inset by tolerance/2 (= 1 Å); the
+    # interface planes at z = 20 and 25 stay where the layer plan put them.
+    assert "inside box 1.0000 1.0000 1.0000 39.0000 39.0000 20.0000" in text
+    assert "inside box 1.0000 1.0000 25.0000 39.0000 39.0000 54.0000" in text

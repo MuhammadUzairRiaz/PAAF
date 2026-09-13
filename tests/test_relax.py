@@ -273,6 +273,9 @@ def test_without_lammps_the_deck_is_written_and_the_fact_is_stated(tmp_path,
                                                                    monkeypatch):
     monkeypatch.setenv("PATH", "/nonexistent")
     monkeypatch.setenv("CONDA_PREFIX", str(tmp_path / "nope"))
+    # find_lammps also searches sibling conda environments; blank those too.
+    import paaf.cell.relax as _relax
+    monkeypatch.setattr(_relax, "_conda_env_bin_dirs", lambda: [])
     mol = _tiny_molecule()
     data = tmp_path / "cell.data"
     data.write_text("dummy\n")

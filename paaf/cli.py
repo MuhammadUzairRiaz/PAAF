@@ -40,18 +40,22 @@ def _convert_par(ns: argparse.Namespace) -> int:
 def _run(ns: argparse.Namespace) -> int:
     cfg = Config.load(ns.config)
     res = run_pipeline(cfg)
-    print(json.dumps(res, indent=2))
+    print(json.dumps(res, indent=2, default=str))
     return 0
 
 
 def _build(ns: argparse.Namespace) -> int:
+    box = [float(x) for x in ns.box]
     cfg = Config(
         project_name=ns.name,
-        output_dir=ns.output,
+        output_dir=str(ns.output),
         monomers=[MonomerSpec(file=m) for m in ns.monomer],
-        optimizer=OptimizerCfg(enabled=not ns.no_opt, ff=ns.opt_ff, steps=ns.opt_steps),
+        optimizer=OptimizerCfg(enabled=not ns.no_opt, ff=ns.opt_ff, steps=ns.opt_steps,
+                               tol=ns.opt_tol, algorithm=ns.opt_alg),
         chain=ChainCfg(n_monomers=ns.n, mode=ns.mode),
-        box=BoxCfg(n_chains=ns.n_chains, size=ns.box),
+        box=BoxCfg(n_chains=ns.n_chains,
+                   shape="cubic" if len(set(box)) == 1 else "orthorhombic",
+                   a=box[0], b=box[1], c=box[2], size=box),
         force_field=ForceFieldCfg(key=ns.ff, dl_lib_dir=ns.dl_lib),
         lammps=LammpsCfg(ensemble=ns.ensemble, temperature=ns.temperature),
         run_moltemplate=not ns.no_moltemplate,
@@ -59,8 +63,16 @@ def _build(ns: argparse.Namespace) -> int:
         gromacs_include_itp=ns.gromacs_itp,
     )
     res = run_pipeline(cfg)
-    print(json.dumps(res, indent=2))
+    print(json.dumps(res, indent=2, default=str))
     return 0
+
+
+def _density_looks_like_g_cm3(value) -> bool:
+    if value is not None and value < 50:
+        print(f"error: --density {value} looks like g/cm³; this option takes "
+              f"kg/m³ (1.0 g/cm³ = 1000 kg/m³).", file=sys.stderr)
+        return True
+    return False
 
 
 def _gui(_: argparse.Namespace) -> int:
@@ -70,6 +82,8 @@ def _gui(_: argparse.Namespace) -> int:
 
 def _pack_cell(ns: argparse.Namespace) -> int:
     from .cell import pack_cell, PackSpec
+    if _density_looks_like_g_cm3(ns.density):
+        return 2
     specs = []
     for s in ns.species:
         parts = s.split(":")
@@ -161,9 +175,11 @@ def _build_layers(ns: argparse.Namespace) -> int:
 
 
 def _solvate_cli(ns: argparse.Namespace) -> int:
+    if _density_looks_like_g_cm3(ns.density):
+        return 2
     from .cell import solvate
     mol, box = solvate(ns.solute, solvent=ns.solvent, n_solvent=ns.n_solvent,
-                      density_kg_m3=ns.density, out_path=ns.out)
+                      density_kg_m3=ns.density, box_ang=ns.box, out_path=ns.out)
     print(f"Wrote {ns.out}  ({len(mol.atoms)} atoms, box={box:.2f} Å)")
     return 0
 
@@ -188,11 +204,13 @@ def _reactions_learn(ns: argparse.Namespace) -> int:
 
 def _reactions_apply(ns: argparse.Namespace) -> int:
     from .reaction import ReactionLibrary
-    from .xlink_engine import apply_library
+    from .xlink_engine import RETYPE_WARNING, apply_library
     lib = ReactionLibrary.load(ns.library)
     stats = apply_library(ns.system, lib, ns.out, max_events=ns.max_events, cutoff=ns.cutoff)
     print(json.dumps(stats.as_dict(), indent=2))
     print(f"Wrote crosslinked system -> {ns.out}")
+    if stats.events_applied:
+        print(f"WARNING: {RETYPE_WARNING}", file=sys.stderr)
     return 0
 
 
@@ -260,8 +278,14 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--output", type=Path, default=Path("./output"))
     sp.add_argument("--name", default="polymer")
     sp.add_argument("--no-opt", action="store_true", help="Skip OpenBabel optimization")
-    sp.add_argument("--opt-ff", default="MMFF94")
+    sp.add_argument("--opt-ff", default="MMFF94",
+                    choices=["MMFF94", "MMFF94s", "UFF", "Ghemical", "GAFF"],
+                    help="OpenBabel force field for minimisation")
     sp.add_argument("--opt-steps", type=int, default=10000)
+    sp.add_argument("--opt-tol", type=float, default=1.0e-6,
+                    help="Convergence tolerance")
+    sp.add_argument("--opt-alg", choices=["cg", "sd"], default="cg",
+                    help="cg = conjugate gradients, sd = steepest descent")
     sp.add_argument("--ensemble", default="npt")
     sp.add_argument("--temperature", type=float, default=300.0)
     sp.add_argument("--no-moltemplate", action="store_true",
@@ -305,7 +329,8 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("pack-cell", help="Pack molecules into an amorphous periodic box")
     sp.add_argument("--species", action="append", required=True,
                     help="file:count[:name] triplet; repeat for blends")
-    sp.add_argument("--density", type=float, default=None, help="target density kg/m³")
+    sp.add_argument("--density", type=float, default=None,
+                    help="target density kg/m³ (GUI uses g/cm³; 1.0 g/cm³ = 1000 kg/m³)")
     sp.add_argument("--box", type=float, default=None, help="cubic box side (Å)")
     sp.add_argument("--seed", type=int, default=12345)
     sp.add_argument("--out", type=Path, required=True)
@@ -357,7 +382,8 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--layer", action="append", required=True,
                     help="'file:path[:name[:offx,offy[:gap]]]' or "
                          "'preset:name:nx,ny,nz[:offx,offy[:gap]]'; repeat")
-    sp.add_argument("--gap", type=float, default=3.0, help="default Z gap between layers (Å)")
+    sp.add_argument("--gap", type=float, default=5.0,
+                    help="default Z gap between layers (Å); same default as the GUI")
     sp.add_argument("--no-center", action="store_true",
                     help="Don't center layers on the largest xy footprint")
     sp.add_argument("--out", type=Path, required=True)
@@ -368,7 +394,10 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--solute", type=Path, required=True)
     sp.add_argument("--solvent", default="water")
     sp.add_argument("--n-solvent", type=int, default=500)
-    sp.add_argument("--density", type=float, default=None)
+    sp.add_argument("--density", type=float, default=None,
+                    help="target density kg/m³ (e.g. 997 for water; GUI uses g/cm³)")
+    sp.add_argument("--box", type=float, default=None,
+                    help="cubic box side (Å); used instead of the solvent density")
     sp.add_argument("--out", type=Path, required=True)
     sp.set_defaults(func=_solvate_cli)
 

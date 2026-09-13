@@ -89,7 +89,8 @@ _CURATED: Dict[str, MonomerRecipe] = {
                            tags=["curated"]),
     "PEO":   MonomerRecipe("PEO", "[*]CCO[*]",           "CCOC",         "Poly(ethylene oxide)",
                            tags=["curated"]),
-    "PU":    MonomerRecipe("PU",  "[*]NC(=O)O[*]",       "NC(=O)OC",     "Polyurethane (generic linkage)",
+    # -CH2CH2-O-C(=O)-NH- : the bare [*]NC(=O)O[*] linkage joined N to O.
+    "PU":    MonomerRecipe("PU",  "[*]CCOC(=O)N[*]",     "CCOC(=O)NC",   "Polyurethane (ethylene urethane repeat)",
                            tags=["curated"]),
     "PA6":   MonomerRecipe("PA6", "[*]NCCCCCC(=O)[*]",   "NCCCCCC(=O)O", "Nylon 6",
                            tags=["curated"]),

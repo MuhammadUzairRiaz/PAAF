@@ -100,7 +100,8 @@ class _BuildWorker(QObject):
             # bond distance (1.41 A) from ring carbons, the typer bonds them,
             # and the cell cannot be typed. No push-off can fix interlocked
             # topology; a different seed can. The probe is a dress-only
-            # back-map (no push-off), which costs well under a second.
+            # back-map (no push-off); it is silent but can take minutes on
+            # large cells.
             attempts = 8 if o.get("do_export") else 1
             result = None
             best = None                       # (n_speared, grown result)
@@ -496,7 +497,28 @@ class ComponentRow(QWidget):
             "[*]CC([*])c1ccccc1": "PS",
             "[*]CC([*])(C)C(=O)OC": "PMMA",
         }
-        return table.get((smiles or "").strip(), "")
+        text = (smiles or "").strip()
+        if text in table:
+            return table[text]
+        # The same polymer can be written many ways ('C([*])C[*]' is PE):
+        # compare canonical forms so the parameterised model is not missed.
+        try:
+            from rdkit import Chem, RDLogger
+            RDLogger.DisableLog("rdApp.*")
+
+            def canon(s):
+                m = Chem.MolFromSmiles(s)
+                return Chem.MolToSmiles(m) if m is not None else None
+
+            key = canon(text)
+            if key is None:
+                return ""
+            for smi, model in table.items():
+                if canon(smi) == key:
+                    return model
+        except Exception:
+            pass
+        return ""
 
 
 # ==================================================================== the tab
@@ -617,8 +639,9 @@ class AmorphousTab(QWidget):
             "compress the rest with an NPT run. Constructing straight at bulk "
             "density leaves no room for side groups: they end up inside one "
             "another, and a typer that perceives bonds by distance sees rings "
-            "and double bonds that are not there. 50-70% is the usual "
-            "compromise; lower it if typing still fails."))
+            "and double bonds that are not there. 40-50% is the usual "
+            "compromise (default 45%; higher values thread rings); lower it "
+            "if typing still fails."))
         self.build_fraction.valueChanged.connect(self._on_build_fraction)
         form.addRow("Build at", self.build_fraction)
 
@@ -1596,6 +1619,7 @@ class AmorphousTab(QWidget):
             "mpi_ranks": int(self.mpi_ranks.value()),
         }
 
+        self._export_dir = (Path(out_dir) / options["name"]) if out_dir else None
         self._set_busy(True)
         self._thread = QThread(self)
         self._worker = _BuildWorker(self._composition, options)
@@ -1671,7 +1695,16 @@ class AmorphousTab(QWidget):
 
     @pyqtSlot()
     def _on_cancelled(self) -> None:
-        self.blocker.setText("Build cancelled. Nothing was written.")
+        folder = getattr(self, "_export_dir", None)
+        try:
+            partial = folder is not None and folder.is_dir() and any(folder.iterdir())
+        except OSError:
+            partial = False
+        if partial:
+            self.blocker.setText(
+                f"Build cancelled. Partial files may remain in {folder}.")
+        else:
+            self.blocker.setText("Build cancelled. Nothing was written.")
         self._set_badge(self.result_badge, "cancelled", "warn")
         self._rlog("build cancelled by the user")
 

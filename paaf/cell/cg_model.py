@@ -239,6 +239,23 @@ def build_cg_cell(
             if mol_of[i] == mol_of[i - 1] == mol_of[i - 2]:
                 angles.append((type_of[i - 1], i - 1, i, i + 1))
 
+    # ---- starting bond length vs the FENE+WCA minimum (~0.97 sigma)
+    spacing_note = ""
+    if bonds:
+        d = np.array([pos[j - 1] - pos[i - 1] for _bt, i, j in bonds])
+        d -= dims * np.round(d / dims)                 # minimum image
+        lengths = np.linalg.norm(d, axis=1)
+        sig_b = np.array([sigma[bt - 1] for bt, _i, _j in bonds])
+        ratio = float(np.mean(lengths / (0.97 * sig_b)))
+        if ratio < 0.8:
+            spacing_note = (
+                f"WARNING: bonded beads start at {ratio:.2f} x the FENE+WCA "
+                f"equilibrium (mean {lengths.mean():.2f} A vs 0.97 sigma = "
+                f"{0.97 * sig_b.mean():.2f} A). Bonds begin compressed; keep "
+                f"the soft push-off and a small timestep, or use a coarser "
+                f"mapping.")
+            emit("  " + spacing_note)
+
     # ---- data file ---------------------------------------------------
     L = [f"PAAF Kremer-Grest CG cell ({st.mapping} mapping, "
          f"{units_line} units)", "",

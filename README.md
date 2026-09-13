@@ -225,7 +225,8 @@ python run_paaf.py
 PYTHONPATH=. python -m pytest tests/ -q
 ```
 
-~700 tests; those needing RDKit/PyQt5 skip automatically when missing.
+~1,600 tests; those needing RDKit/PyQt5 skip automatically when missing.
+Run GUI tests headless with `QT_QPA_PLATFORM=offscreen`.
 
 ## 5. Troubleshooting
 

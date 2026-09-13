@@ -246,6 +246,9 @@ def build_chain_from_smiles(
     opt_tol: float = 1.0e-6,
     cap_carboxyl_end: bool = True,
     name: str = "chain",
+    opt_algorithm: str = "cg",
+    cancel=None,
+    report_energy: bool = True,
 ) -> Molecule:
     """Build an n-unit homopolymer chain from a ``[*]…[*]`` SMILES.
 
@@ -274,7 +277,9 @@ def build_chain_from_smiles(
     out = _mbuild_to_internal(chain, name=name)
     if optimize:
         from . import optimizer
-        optimizer.optimize(out, ff=opt_ff, steps=opt_steps, tol=opt_tol)
+        optimizer.optimize(out, ff=opt_ff, steps=opt_steps, tol=opt_tol,
+                           algorithm=opt_algorithm, cancel=cancel,
+                           report_energy=report_energy)
     return out
 
 
@@ -311,6 +316,9 @@ def build_copolymer_from_smiles(
     opt_tol: float = 1.0e-6,
     cap_carboxyl_end: bool = True,
     name: str = "copolymer",
+    opt_algorithm: str = "cg",
+    cancel=None,
+    report_energy: bool = True,
 ) -> Molecule:
     """Build a multi-monomer copolymer chain from per-monomer ``[*]…[*]`` SMILES.
 
@@ -359,7 +367,9 @@ def build_copolymer_from_smiles(
     out = _mbuild_to_internal(chain, name=name)
     if optimize:
         from . import optimizer
-        optimizer.optimize(out, ff=opt_ff, steps=opt_steps, tol=opt_tol)
+        optimizer.optimize(out, ff=opt_ff, steps=opt_steps, tol=opt_tol,
+                           algorithm=opt_algorithm, cancel=cancel,
+                           report_energy=report_energy)
     return out
 
 

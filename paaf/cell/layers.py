@@ -75,7 +75,7 @@ def _bounds(mol: Molecule) -> Tuple[np.ndarray, np.ndarray]:
 
 def build_layers(
     layers: Sequence[LayerSpec],
-    gap_ang: float = 3.0,
+    gap_ang: float = 5.0,
     center_xy: bool = True,
     name: str = "layers",
     out_path: Optional[str | Path] = None,

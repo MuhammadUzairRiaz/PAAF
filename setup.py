@@ -20,9 +20,13 @@ setup(
     install_requires=[
         "numpy>=1.20",
         "pyyaml>=6.0",
+        "scipy>=1.7",
+        "networkx>=2.6",
+        "rdkit>=2022.9",
     ],
     extras_require={
-        "gui": ["PyQt5>=5.15"],
+        # GUI: pip install .[gui]
+        "gui": ["PyQt5>=5.15", "PyQtWebEngine>=5.15"],
         "chem": ["openbabel-wheel", "mbuild"],
         "dev": ["pytest"],
     },

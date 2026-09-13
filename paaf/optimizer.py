@@ -11,6 +11,8 @@ Moltemplate export) can still proceed.
 """
 from __future__ import annotations
 
+import shutil
+import tempfile
 from pathlib import Path
 from typing import List, Literal, Sequence
 
@@ -52,6 +54,7 @@ def optimize(
     fallback: bool = True,
     strict: bool = False,
     cancel=None,
+    report_energy: bool = True,
 ) -> Molecule:
     """Minimize `mol` in place with an OpenBabel force field.
 
@@ -76,9 +79,23 @@ def optimize(
             "`conda install -c conda-forge openbabel`."
         ) from exc
 
+    from .cell.packing import PackCancelled
+
+    steps = int(steps)
+    tol = float(tol)
+    if steps <= 0:
+        raise ValueError(f"Optimizer steps must be a positive integer, got {steps}")
+    if not tol > 0:
+        raise ValueError(f"Optimizer convergence tolerance must be > 0, got {tol}")
+    if algorithm not in ("cg", "sd"):
+        raise ValueError(f"Optimizer algorithm must be 'cg' or 'sd', got {algorithm!r}")
+    if not mol.atoms:
+        return mol
+
     # Write once to a temp mol2 so we can retry with different FFs without
     # re-parsing the structure each time.
-    tmp = Path(f"/tmp/_mta_{id(mol)}.mol2")
+    tmp_dir = tempfile.mkdtemp(prefix="paaf_opt_")
+    tmp = Path(tmp_dir) / "in.mol2"
     write(mol, tmp)
     obmol = next(pybel.readfile("mol2", str(tmp)))
 
@@ -105,10 +122,7 @@ def optimize(
         if strict:
             raise RuntimeError(msg)
         log.warning(msg)
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         return mol
 
     if used_ff != ff:
@@ -144,19 +158,19 @@ def optimize(
         for a, ob_atom in zip(mol.atoms, obmol.atoms):
             a.xyz[:] = ob_atom.coords
         e_final = force_field.Energy()
-        log.info(
-            "Optimization done (%s):  initial E = %.4f  →  final E = %.4f  "
-            "(ΔE = %+.4f)",
-            used_ff, e_initial, e_final, e_final - e_initial,
-        )
+        if report_energy:
+            log.info(
+                "Optimization done (%s):  initial E = %.4f  →  final E = %.4f  "
+                "(ΔE = %+.4f)",
+                used_ff, e_initial, e_final, e_final - e_initial,
+            )
+    except PackCancelled:
+        raise
     except Exception as exc:
         log.warning("Optimizer (%s) errored mid-run: %s. Returning unoptimized "
                     "coordinates.", used_ff, exc)
     finally:
-        try:
-            tmp.unlink()
-        except OSError:
-            pass
+        shutil.rmtree(tmp_dir, ignore_errors=True)
     return mol
 
 

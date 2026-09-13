@@ -178,7 +178,13 @@ def write(mol: Molecule, path: str | Path) -> Path:
         ob_atom.SetAtomicNum(openbabel.GetAtomicNum(a.element))
         ob_atom.SetVector(*a.xyz.tolist())
     for i, j, order in mol.bonds:
-        ob.AddBond(i + 1, j + 1, int(round(order)) or 1)
+        # 1.5 is an aromatic bond (RDKit's perception returns it). round(1.5)
+        # is 2, which wrote every aromatic ring as all-double bonds: OpenBabel
+        # then saw sp carbons, aromaticity was lost, and the typer gave ring
+        # atoms alkene/amine types moltemplate has no bonded terms for.
+        # OpenBabel's code for an aromatic bond is 5.
+        ob_order = 5 if abs(float(order) - 1.5) < 1e-6 else (int(round(order)) or 1)
+        ob.AddBond(i + 1, j + 1, ob_order)
     pmol = pybel.Molecule(ob)
     pmol.title = mol.name
     pmol.write(ext, str(path), overwrite=True)

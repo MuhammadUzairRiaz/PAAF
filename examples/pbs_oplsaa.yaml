@@ -24,7 +24,8 @@ chain:
 
 box:
   n_chains: 5
-  size: [80, 80, 80]
+  shape: cubic
+  a: 80
 
 force_field:
   key: oplsaa

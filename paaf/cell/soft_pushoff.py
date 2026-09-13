@@ -15,9 +15,9 @@ What this does instead
 The standard preparation-stage push-off (Kremer & Grest): a short LAMMPS run
 with the purely repulsive ``pair_style soft``, whose amplitude is ramped from
 almost nothing to a full push while ``fix nve/limit`` caps how far any atom
-moves per step. Bonds are held by harmonic springs at their current per-class
-lengths. No angles, no dihedrals, no charges — and crucially **no atom
-types**, which is what breaks the circularity: the cell cannot be typed until
+moves per step. Bonds and angles are held by harmonic terms at their current
+per-class values (angles keep CH2 hydrogens from splaying). No dihedrals, no
+charges — and crucially **no atom types**, which is what breaks the circularity: the cell cannot be typed until
 the contacts are gone, and this removes the contacts without needing types.
 
 The backbone is NOT pinned here. That is deliberate: the bead positions were

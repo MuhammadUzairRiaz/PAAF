@@ -393,8 +393,18 @@ def build_chain(
     cap_carboxyl_end: bool = True,
     relax_conformation: bool = True,
     conformer_seed: Optional[int] = None,
+    optimize: bool = True,
+    opt_ff: str = "UFF",
+    opt_steps: int = 10000,
+    opt_tol: float = 1.0e-6,
+    opt_algorithm: str = "cg",
+    cancel=None,
+    report_energy: bool = True,
 ) -> Molecule:
     """High-level chain builder.
+
+    ``optimize``/``opt_*``/``cancel`` control the OpenBabel minimisation the
+    SMILES route runs on the assembled chain (off when ``optimize=False``).
 
     Parameters
     ----------
@@ -416,6 +426,7 @@ def build_chain(
     """
     seq = _make_sequence(len(monomers), n, mode, fractions, block_sizes, seed)
     log.info("Chain sequence: %s", "".join(chr(ord("A") + i) for i in seq[:32]) + ("..." if n > 32 else ""))
+    _check_junctions(monomers, seq)
 
     def _finish(chain: Molecule) -> Molecule:
         """Give the assembled chain a melt-like conformation.
@@ -447,6 +458,10 @@ def build_chain(
                         "extended. Energy minimisation will NOT coil it.", exc)
         return chain
 
+    _opt_kw = dict(optimize=optimize, opt_ff=opt_ff, opt_steps=opt_steps,
+                   opt_tol=opt_tol, opt_algorithm=opt_algorithm,
+                   cancel=cancel, report_energy=report_energy)
+
     # -- Preferred path: SMILES-based mBuild builder (ported from the user's
     #    create_chain.py). Works for both homopolymers and copolymers as long
     #    as every monomer carries a polymerization SMILES (from the .polysmi
@@ -466,6 +481,7 @@ def build_chain(
                         poly_smiles, n=n,
                         cap_carboxyl_end=cap_carboxyl_end,
                         name=getattr(m0, "name", "chain"),
+                        **_opt_kw,
                     ))
                 log.info("SMILES-builder deps missing; using legacy mBuild path.")
             except Exception as e:
@@ -488,6 +504,7 @@ def build_chain(
                         poly_list, seq,
                         cap_carboxyl_end=cap_carboxyl_end,
                         name=cname or "copolymer",
+                        **_opt_kw,
                     ))
                 log.info("SMILES-builder deps missing; using legacy copolymer path.")
             except Exception as e:
@@ -518,6 +535,35 @@ def build_chain(
                           sample_torsions=relax_conformation)
 
 
+#: Linking these pairs head-to-tail makes a peroxide / N-O bond, which no
+#: polymer backbone has — the repeat unit's [*] marks are in the wrong place.
+_BAD_JUNCTIONS = {frozenset(("O",)), frozenset(("O", "N"))}
+
+
+def _check_junctions(monomers: Sequence[Monomer], seq: Sequence[int]) -> None:
+    """Refuse a chain whose unit-to-unit bond would be O–O or N–O."""
+    pairs = set()
+    for a, b in zip(seq, seq[1:]):
+        pairs.add((a, b))
+    if len(seq) == 1:
+        return
+    for a, b in pairs:
+        try:
+            tail = monomers[a].molecule.atoms[monomers[a].tail_index].element
+            head = monomers[b].molecule.atoms[monomers[b].head_index].element
+        except (IndexError, AttributeError):
+            continue
+        if frozenset((tail, head)) in _BAD_JUNCTIONS:
+            name_a = getattr(monomers[a], "name", "?")
+            name_b = getattr(monomers[b], "name", "?")
+            raise ValueError(
+                f"Linking {name_a} to {name_b} would bond {tail} to {head} "
+                f"(a {tail}–{head} bond is not a polymer backbone). The repeat "
+                f"unit's [*] connection points are misplaced — e.g. a "
+                f"polyester unit must end on the carbonyl carbon, "
+                f"[*]OCCOC(=O)c1ccc(C(=O)[*])cc1, not on the ester oxygen.")
+
+
 def _make_sequence(
     n_monomers: int,
     n: int,
@@ -532,6 +578,12 @@ def _make_sequence(
         return [i % n_monomers for i in range(n)]
     if mode == "block":
         block_sizes = list(block_sizes or [max(1, n // n_monomers)] * n_monomers)
+        if (len(block_sizes) != n_monomers or any(int(k) < 0 for k in block_sizes)
+                or sum(int(k) for k in block_sizes) == 0):
+            raise ValueError(
+                f"block mode needs {n_monomers} block sizes (one per monomer, "
+                f"non-negative, at least one > 0), got {block_sizes}")
+        block_sizes = [int(k) for k in block_sizes]
         seq: List[int] = []
         i = 0
         while len(seq) < n:
@@ -546,6 +598,11 @@ def _make_sequence(
         return seq[:n]
     if mode == "random":
         fractions = list(fractions or [1.0 / n_monomers] * n_monomers)
+        if (len(fractions) != n_monomers or any(float(f) < 0 for f in fractions)
+                or sum(float(f) for f in fractions) <= 0):
+            raise ValueError(
+                f"random mode needs {n_monomers} fractions (one per monomer, "
+                f"non-negative, positive sum), got {fractions}")
         rng = random.Random(seed)
         return rng.choices(range(n_monomers), weights=fractions, k=n)
     raise ValueError(f"Unknown sequence mode {mode!r}")

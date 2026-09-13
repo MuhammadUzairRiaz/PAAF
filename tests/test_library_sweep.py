@@ -102,9 +102,14 @@ def test_every_polymer_either_builds_soundly_or_is_refused(rec):
     # rather than fixed. Undersizing it is what produced the 12.29 Å "bonds"
     # that first looked like a back-mapping defect and were an artefact of
     # measuring across a boundary.
+    # Built at 45% of the target density, the Amorphous Cell page's default.
+    # Growing straight at 0.85 g/cm³ dead-ends the fourth chain of long
+    # flexible polyesters (W01_P046-P048) in every seed tried — a limit the
+    # app never hits, because it always builds loose and compresses later.
     comp = from_chain_counts(
         [Component(name=rec.pid or "P", repeat_unit=rec.smiles,
-                   degree_of_polymerisation=20, n_chains=4)], 0.85)
+                   degree_of_polymerisation=20, n_chains=4)], 0.85,
+        build_fraction=0.45)
     res = grow_amorphous_cell(comp.grow_specs(), comp.box(),
                               temperature=413.0, seed=5)
     # Growth works for every polymer, ring in the backbone or not, because a

@@ -316,7 +316,9 @@ def test_the_listing_covers_three_units_with_distinct_keys():
     rows = _dialog_rows(_isoprene())
     per_role = Counter(r["role"] for r in rows)
     print(f"\n  {dict(per_role)}")
-    assert set(per_role) == set(ROLES)
+    # "cap" rows exist only when the chain gets a terminal group (a carboxyl
+    # cap); isoprene has none.
+    assert {"head", "middle", "tail"} <= set(per_role) <= set(ROLES)
     assert len({r["key"] for r in rows}) == len(rows), "two rows share a key"
 
 
@@ -344,10 +346,10 @@ def test_the_suggested_types_differ_between_the_ends_and_the_middle():
 def test_the_alkene_is_typed_the_same_in_every_unit():
     """Only the link sites change with position; the rest of the unit does not."""
     rows = _dialog_rows(_isoprene())
-    alkene = {r["role"]: sorted(r["guess"] for r in rows
-                                if r["guess"] in {"141", "142", "144"}
-                                and r["role"] == role)
-              for role in ROLES}
+    alkene = {role: sorted(r["guess"] for r in rows
+                           if r["guess"] in {"141", "142", "144"}
+                           and r["role"] == role)
+              for role in ("head", "middle", "tail")}
     print(f"\n  {alkene}")
     assert alkene["head"] == alkene["middle"] == alkene["tail"] != []
 

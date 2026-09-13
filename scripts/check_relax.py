@@ -85,7 +85,9 @@ def main() -> int:
 
     if lmp is None:
         print("LAMMPS not found, so the deck was not validated.")
-        return 0
+        # 77 = "skipped" (automake convention): a missing LAMMPS must not look
+        # like a pass to CI or a calling script.
+        return 0 if "--allow-missing-lammps" in sys.argv else 77
 
     print("=" * 68)
     print(f"validating with: {lmp} -skiprun -in relax.in")

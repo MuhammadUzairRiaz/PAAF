@@ -93,8 +93,8 @@ class LayeringTab(QWidget):
 
         self.axis = QComboBox(); self.axis.addItems(["z", "x", "y"])
         self.axis.setToolTip(wrap_tooltip(
-            "Which direction the layers stack along. Auto-placed layers are "
-            "centred on the two other axes."))
+            "Which direction the layers stack along. Auto-placed layers "
+            "start at 0 on the two other axes; pin an origin to centre one."))
         self.axis.currentIndexChanged.connect(self._refresh_plan)
         f.addRow("Stack along", self.axis)
 
@@ -168,6 +168,7 @@ class LayeringTab(QWidget):
         b_pack = _btn("Build layered cell", "primary")
         b_pack.clicked.connect(self._pack)
         act.addWidget(b_pack)
+        self.pack_btn = b_pack
         iv.addLayout(act)
         iv.addStretch(1)
         v.addWidget(inner, 1)
@@ -390,7 +391,7 @@ class LayeringTab(QWidget):
 
     # ------------------------------------------------------------ build
     def _pack(self) -> None:
-        from ..layering import LayeringError, build_layered_cell
+        from ..layering import build_layered_cell
         try:
             specs = self._layer_specs(need_files=True)
         except ValueError as e:
@@ -412,21 +413,32 @@ class LayeringTab(QWidget):
                   if self.write_in.isChecked() else None)
         from ..blend_minimise import MinimiseSettings
         self.log.emit(f"[layering] building {len(specs)} layers …")
-        try:
-            path = build_layered_cell(
-                specs, out_data, axis=self.axis.currentText(),
-                gap=float(self.gap.value()), total_box=self._cell_arg(),
-                out_input_file=out_in, seed=int(self.seed.value()),
-                tolerance=float(self.tol.value()),
-                minimise=MinimiseSettings(enabled=self.do_min.isChecked()),
-                progress=lambda m: self.log.emit(f"[layering] {m}"))
-        except (LayeringError, Exception) as e:
-            QMessageBox.critical(self, "Layering", f"Build failed:\n{e}")
-            self.log.emit(f"[layering] ERROR: {e}")
-            return
-        self.log.emit(f"[layering] Wrote {path}")
-        QMessageBox.information(
-            self, "Layering",
-            f"Wrote {path.name}"
-            + (f" and {out_in.name}" if out_in else "")
-            + f"\n\nin {out_dir}")
+        kwargs = dict(axis=self.axis.currentText(),
+                      gap=float(self.gap.value()), total_box=self._cell_arg(),
+                      out_input_file=out_in, seed=int(self.seed.value()),
+                      tolerance=float(self.tol.value()),
+                      minimise=MinimiseSettings(enabled=self.do_min.isChecked()))
+
+        # Worker thread: packmol / LAMMPS would otherwise freeze the window.
+        def work(progress):
+            return build_layered_cell(
+                specs, out_data, progress=lambda m: progress(f"[layering] {m}"),
+                **kwargs)
+
+        def done(path):
+            self.log.emit(f"[layering] Wrote {path}")
+            QMessageBox.information(
+                self, "Layering",
+                f"Wrote {Path(path).name}"
+                + (f" and {out_in.name}" if out_in else "")
+                + f"\n\nin {out_dir}")
+
+        def fail(msg):
+            self.log.emit(f"[layering] ERROR: {msg}")
+            QMessageBox.critical(self, "Layering",
+                                 f"Build failed:\n{msg.split(chr(10) * 2)[0]}")
+
+        from .background import run_in_background
+        self._last_run = run_in_background(self, work, on_done=done, on_fail=fail,
+                                           on_progress=self.log.emit,
+                                           busy_widget=self.pack_btn)

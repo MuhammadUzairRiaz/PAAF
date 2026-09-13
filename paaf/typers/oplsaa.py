@@ -97,9 +97,18 @@ _RULES: List[Tuple[str, str, str]] = [
     ("[NX1]#[CX2]",                       "753", "nitrile N"),
     ("[CX2]#[NX1]",                       "754", "nitrile C"),
 
+    # ---- Phenol (aromatic C-O-H) ------------------------------------------
+    ("[OX2H][c]",                         "167", "phenol O"),
+    ("[H][OX2][c]",                       "168", "phenol H"),
+    ("[c][OX2H]",                         "166", "phenol ipso C"),
+
     # ---- Alcohol (aliphatic C-O-H) ---------------------------------------
     ("[OX2H][CX4]",                       "154", "alcohol -OH oxygen"),
     ("[H][OX2][CX4]",                     "155", "alcohol -OH hydrogen"),
+    # Any other hydroxyl (silanol Si-OH, chain-end OH): the H must still be
+    # a hydroxyl H, or O(154)-H(140) has no bond parameters.
+    ("[OX2H]",                            "154", "hydroxyl O (generic)"),
+    ("[H][OX2]",                          "155", "hydroxyl H (generic)"),
 
     # ---- Ether (C-O-C, both C sp3) --------------------------------------
     ("[OX2]([CX4])[CX4]",                 "180", "ether -O- sp3"),
@@ -108,7 +117,6 @@ _RULES: List[Tuple[str, str, str]] = [
     ("[cH]",                              "145", "aromatic C (benzene)"),   # matches C in c1ccccc1
     ("[c]([#6])[c]([c])[c]",              "148", "aromatic C attached to alkyl"),
     ("[c]([OX2])[c]",                     "199", "aromatic C - alkoxy"),
-    ("[c]([OH])[c]",                      "165", "aromatic C - phenol"),
     ("[H][c]",                            "146", "aromatic H (benzene)"),
     # generic aromatic C (fallback within aromatic ring)
     ("[c]",                               "145", "aromatic C (generic)"),
@@ -141,6 +149,24 @@ _RULES: List[Tuple[str, str, str]] = [
     ("[CX3]=[CX3]",                       "141", "internal alkene C"),
     ("[H][CX3]=[CX3]",                    "144", "alkene =C-H hydrogen"),
 
+    # ---- sp3 carbons bonded to oxygen -----------------------------------
+    # Without these, CH2 next to an ether/ester/alcohol O fell through to the
+    # element fallback (135, alkane CH3) with the wrong charge. Ester alkoxy
+    # carbons first: the ether patterns below would also match them.
+    ("[CX4H3][OX2][CX3]=O",               "468", "ester methoxy C"),
+    ("[CX4H2][OX2][CX3]=O",               "490", "ester alkoxy CH2 C(H2OS)"),
+    ("[CX4H1][OX2][CX3]=O",               "491", "ester alkoxy CH C(HOS)"),
+    ("[CX4H0][OX2][CX3]=O",               "492", "ester alkoxy C C(OS)"),
+    ("[H][CX4][OX2][CX3]=O",              "469", "ester alkoxy H"),
+    ("[CX4H3,CX4H2][OX2H]",               "157", "alcohol CH3/CH2 C(OH)"),
+    ("[CX4H1][OX2H]",                     "158", "alcohol CH C(OH)"),
+    ("[CX4H0][OX2H]",                     "159", "alcohol C C(OH)"),
+    ("[CX4H3][OX2][#6]",                  "181", "ether CH3 C(H3OR)"),
+    ("[CX4H2][OX2][#6]",                  "182", "ether CH2 C(H2OR)"),
+    ("[CX4H1][OX2][#6]",                  "183", "ether CH C(HOR)"),
+    ("[CX4H0][OX2][#6]",                  "184", "ether C C(OR)"),
+    ("[H][CX4][OX2][#6]",                 "185", "ether alpha H H(COR)"),
+
     # ---- Alkane atoms (aliphatic C) --------------------------------------
     # Order matters: CH3 (attached to only one heavy atom), then CH2, then CH, then C.
     ("[CX4H3]([#6])",                     "135", "sp3 CH3 (alkane)"),
@@ -157,6 +183,9 @@ _RULES: List[Tuple[str, str, str]] = [
     ("[NX3H1]([CX4])[CX4]",               "901", "secondary amine N-H"),
     ("[NX3H0]([CX4])([CX4])[CX4]",        "902", "tertiary amine N"),
     ("[H][NX3][CX4]",                     "909", "amine N-H hydrogen"),
+    # N-H on anything else (aryl amines): an alkane H (140) on N has no bond
+    # parameters in the library.
+    ("[H][NX3]",                          "909", "N-H hydrogen (generic)"),
 ]
 
 
@@ -180,23 +209,25 @@ def type_oplsaa(mol) -> Dict[int, str]:
     # re-read with pybel so we can use pybel.Smarts on it.
     from ..structure import write
     from pathlib import Path
-    tmp = Path(f"/tmp/_mta_opls_type_{id(mol)}.mol2")
-    write(mol, tmp)
-    pmol = next(pybel.readfile("mol2", str(tmp)))
-    try:
-        tmp.unlink()
-    except OSError:
-        pass
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix="paaf_opls_") as _d:
+        tmp = Path(_d) / "in.mol2"
+        write(mol, tmp)
+        pmol = next(pybel.readfile("mol2", str(tmp)))
 
     n_atoms = len(mol.atoms)
     types: Dict[int, str] = {}
+    from openbabel import openbabel as _ob
     for pattern_str, opls_type, _desc in _RULES:
-        try:
-            smarts = pybel.Smarts(pattern_str)
-        except Exception as exc:
-            log.debug("Skipping malformed SMARTS %r (%s)", pattern_str, exc)
+        pat = _ob.OBSmartsPattern()
+        if not pat.Init(pattern_str):
+            log.debug("Skipping malformed SMARTS %r", pattern_str)
             continue
-        for match in smarts.findall(pmol):
+        pat.Match(pmol.OBMol)
+        # GetMapList, not pybel's findall (GetUMapList): the unique list keeps
+        # one match per atom SET, so for C-O-C only one of the two carbons was
+        # ever the anchor and the other fell through to the element fallback.
+        for match in pat.GetMapList():
             # pybel.Smarts.findall returns tuples of 1-based OpenBabel atom
             # indices; the FIRST atom in the tuple is the anchor.
             anchor_1 = match[0] if isinstance(match, (list, tuple)) else match

@@ -28,7 +28,7 @@ from PyQt5.QtGui import (
     QColor, QFont, QPainter, QSyntaxHighlighter, QTextCharFormat,
 )
 from PyQt5.QtWidgets import (
-    QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
+    QAbstractItemView, QDialog, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel,
     QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
     QCheckBox, QComboBox, QFormLayout, QScrollArea, QSizePolicy, QSpinBox,
     QStyle, QStyleOption, QTabWidget, QTableWidget,
@@ -323,6 +323,14 @@ class MoleculeRow(QWidget):
             f" font-size: {T.FS_CAPTION}px; font-weight: 600;")
         row.addWidget(self.maps_lb)
 
+        self.b_lib = QPushButton("Library…")
+        self.b_lib.setFixedHeight(T.H_CONTROL)
+        self.b_lib.setToolTip("Fill this SMILES from the polymer library "
+                              "(inserts the [*] repeat-unit form)")
+        self.b_lib.setCursor(Qt.PointingHandCursor)
+        self.b_lib.clicked.connect(self._pick_from_library)
+        row.addWidget(self.b_lib)
+
         rm = QPushButton("✕")
         rm.setFixedSize(T.W_REMOVE_COL, T.H_CONTROL)
         rm.setToolTip("Remove this molecule")
@@ -360,10 +368,30 @@ class MoleculeRow(QWidget):
         self.smiles.setText(smiles)
         self._on_changed()
 
+    def is_polymer(self) -> bool:
+        """A repeat unit written with ``[*]`` connection points."""
+        return self.smiles.text().count("[*]") >= 2
+
+    def _pick_from_library(self) -> None:
+        from .library_picker import LibraryPicker
+        dlg = LibraryPicker(self)
+        if dlg.exec_() != QDialog.Accepted:
+            return
+        rec = dlg.selected()
+        if rec is None or not rec.smiles:
+            return
+        if not self.name.text().strip():
+            self.name.setText(rec.pid or rec.name or "")
+        self.smiles.setText(rec.smiles)
+        self._on_changed()
+
     def _on_changed(self) -> None:
         from ..reaction_smiles import parse_atom_maps
         maps = sorted(parse_atom_maps(self.smiles.text()))
-        self.maps_lb.setText(" ".join(str(m) for m in maps) if maps else "—")
+        text = " ".join(str(m) for m in maps)
+        if self.is_polymer():
+            text = f"{text} ×n".strip()
+        self.maps_lb.setText(text or "—")
         self.changed.emit()
 
 
@@ -430,6 +458,20 @@ class ReactionBlock(QWidget):
         self.name.setFixedWidth(220)
         head.addWidget(self.name)
         head.addStretch(1)
+
+        # One chain length per reaction, applied to every [*] repeat unit on
+        # BOTH sides, so the product can never drift from the reactant length.
+        head.addWidget(_label("Chain n", T.FS_CAPTION, T.TEXT_MUTED))
+        self.chain_n = QSpinBox()
+        self.chain_n.setRange(1, 500)
+        self.chain_n.setValue(1)
+        self.chain_n.setFixedHeight(T.H_CONTROL)
+        self.chain_n.setToolTip(
+            "Repeat units for every molecule written with [*] connection "
+            "points (marked ×n). Small molecules are never repeated; atom maps "
+            "stay on the last unit.")
+        self.chain_n.valueChanged.connect(lambda _v: self._emit())
+        head.addWidget(self.chain_n)
 
         self.status = _badge("Not run", "neutral")
         head.addWidget(self.status)
@@ -561,10 +603,23 @@ class ReactionBlock(QWidget):
         return self.name.text().strip() or f"reaction_{self.number}"
 
     def values(self, expand: bool = True) -> tuple:
-        """``(name, reactant_smiles, product_smiles)`` — blanks skipped."""
+        """``(name, reactant_smiles, product_smiles)`` — blanks skipped.
+
+        With ``expand`` (the default) every ``[*]`` repeat unit becomes an
+        n-mer using this reaction's chain length; ``expand=False`` returns the
+        SMILES exactly as typed.
+        """
+        from ..polymer_smiles import expand_if_polymer
+        n = int(self.chain_n.value())
 
         def collect(rows):
-            return [row.values()[1] for row in rows if row.values()[1]]
+            out = []
+            for row in rows:
+                smi = row.values()[1]
+                if not smi:
+                    continue
+                out.append(expand_if_polymer(smi, n) if expand else smi)
+            return out
 
         return self.reaction_name(), collect(self._rows), collect(self._prod_rows)
 
@@ -1099,6 +1154,10 @@ class ReactionSchemeTab(QWidget):
         self.b_next = _button("Next ›", "primary")
         self.b_next.clicked.connect(self._go_next)
         h.addWidget(self.b_next)
+        # The page opens on step 1, and setCurrentIndex(0) on a tab widget that
+        # is already there emits nothing — so apply step 1's buttons now, or
+        # "Export .data…" shows on the Scheme step until the user switches tabs.
+        self._on_step_changed(0)
         return bar
 
     # ---------------------------------------------------------- reactions
@@ -1141,8 +1200,7 @@ class ReactionSchemeTab(QWidget):
 
     def _remove_reaction(self, blk: ReactionBlock) -> None:
         if len(self._blocks) <= 1:
-            self._toast("A scheme needs at least one reaction.")
-            return
+            return          # the remove button is disabled in this state
         self._blocks.remove(blk)
         blk.setParent(None); blk.deleteLater()
         if self._active is blk:
@@ -1155,6 +1213,12 @@ class ReactionSchemeTab(QWidget):
             b.set_number(i)
         n = len(self._blocks)
         self.scheme_count_lb.setText(f"{n} reaction{'s' if n != 1 else ''}")
+        # A scheme always keeps one reaction: say so on the button instead of
+        # letting the user click it and get a popup.
+        for b in self._blocks:
+            b.b_remove.setEnabled(n > 1)
+            b.b_remove.setToolTip("Remove this reaction" if n > 1 else
+                                  "A scheme needs at least one reaction.")
 
     def _on_block_changed(self, blk: ReactionBlock) -> None:
         self._active = blk

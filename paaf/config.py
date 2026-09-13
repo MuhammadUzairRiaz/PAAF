@@ -35,6 +35,10 @@ class OptimizerCfg:
     steps: int = 10000
     tol: float = 1e-6
     algorithm: str = "cg"
+    report_energy: bool = True   # log initial/final energy after each run
+    # If the chosen FF cannot type the molecule, try MMFF94s -> UFF -> Ghemical
+    # (logged). False = use exactly the chosen FF or stop with an error.
+    fallback: bool = True
 
 
 @dataclass
@@ -80,7 +84,7 @@ class BoxCfg:
     # Explicit path to the packmol binary. When set, overrides PATH lookup
     # and env-var detection. Leave empty for auto-detection.
     packmol_path: str = ""
-    # Random-number seed for packmol. -1 (default) = fresh time-based seed
+    # Random-number seed for packmol. -1 (default) = fresh random seed
     # every run → different packing each time. Non-negative = fixed layout.
     packmol_seed: int = -1
     # packmol 'tolerance' in Å (min distance between placed atoms).
@@ -101,6 +105,19 @@ class BoxCfg:
     # Deprecated but kept for backwards compat with old configs.
     # Old code path stored a 3-tuple in `size`.
     size: List[float] = field(default_factory=lambda: [250.0, 250.0, 250.0])
+
+    def __post_init__(self) -> None:
+        # Legacy configs set only `size`; the pipeline reads a/b/c. Map a
+        # non-default size onto edges that were left at their defaults.
+        try:
+            sz = [float(x) for x in (self.size or [])]
+        except (TypeError, ValueError):
+            return
+        if (len(sz) == 3 and sz != [250.0, 250.0, 250.0]
+                and (self.a, self.b, self.c) == (250.0, 250.0, 250.0)):
+            self.a, self.b, self.c = sz
+            if self.shape == "cubic" and len(set(sz)) > 1:
+                self.shape = "orthorhombic"
 
 
 @dataclass
@@ -143,7 +160,7 @@ class BlendCfg:
     """
     enabled: bool = False
     components: List["BlendComponentCfg"] = field(default_factory=list)
-    seed: int = -1                # <0 → time-based, different each run
+    seed: int = -1                # <0 → random seed, different each run
     tolerance: float = 2.0
     out_data: str = "packed_blend.data"
     out_input: str = "packed_blend.in"

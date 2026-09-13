@@ -68,7 +68,8 @@ def test_replicate_puts_every_chain_inside_box(tmp_path):
     pos = {int(l.split()[0]): np.array([float(x) for x in l.split()[4:7]]) for l in atoms}
     for b in _clean(sec["Bonds"]):
         _, _, i, j = (int(x) for x in b.split()[:4])
-        assert math.isclose(np.linalg.norm(pos[i] - pos[j]), 1.5, abs_tol=1e-3)
+        # packmol writes 3-decimal PDB coordinates: up to ~2e-3 Å of rounding
+        assert math.isclose(np.linalg.norm(pos[i] - pos[j]), 1.5, abs_tol=5e-3)
 
 
 def test_lammps_input_includes_init_and_charges(tmp_path):
@@ -103,9 +104,11 @@ def test_pipeline_moltemplate_route_writes_single_chain_then_packs():
             f = node.func
             name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", "")
             calls.setdefault(name, []).append(node)
-    (sys_lt,) = calls["write_system_lt"]
-    kw = {k.arg: k.value for k in sys_lt.keywords}
-    assert isinstance(kw["n_chains"], ast.Constant) and kw["n_chains"].value == 1
+    # The UA bridge path rewrites system.lt; every call must stay one chain.
+    assert calls["write_system_lt"]
+    for sys_lt in calls["write_system_lt"]:
+        kw = {k.arg: k.value for k in sys_lt.keywords}
+        assert isinstance(kw["n_chains"], ast.Constant) and kw["n_chains"].value == 1
     # replicate_single_chain is called twice: DL_FIELD route and moltemplate route
     assert len(calls["replicate_single_chain"]) == 2
     assert "run_moltemplate" in calls

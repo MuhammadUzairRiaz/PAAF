@@ -128,8 +128,15 @@ def _build_blend_packmol(pdb_files: List[Path], counts: List[int],
     # slab and the interfaces land exactly where the gaps put them.
     if regions is None:
         regions = [(0.0, 0.0, 0.0, a, b, c)] * len(pdb_files)
+    # Faces on the periodic boundary are inset by tolerance/2 (packmol has no
+    # PBC). Faces between layers are left alone: packmol already keeps the
+    # tolerance between species packed in the same run.
+    t = min(float(tolerance) / 2.0, min(a, b, c) / 4.0)
     for pdb, n, reg in zip(pdb_files, counts, regions):
-        x0, y0, z0, x1, y1, z1 = reg
+        x0, y0, z0, x1, y1, z1 = (float(v) for v in reg)
+        x0, y0, z0 = (v + t if abs(v) < 1e-6 else v for v in (x0, y0, z0))
+        x1, y1, z1 = (v - t if abs(v - edge) < 1e-6 else v
+                      for v, edge in ((x1, a), (y1, b), (z1, c)))
         lines += [
             f"structure {pdb}",
             f"  number {n}",
@@ -422,7 +429,9 @@ def replicate_blend(
 
     # ---- relax each component once, before it is copied ----------------
     from .blend_minimise import MinimiseSettings, minimise_component
-    settings = minimise if minimise is not None else MinimiseSettings()
+    # None means "no minimisation": only an explicitly enabled
+    # MinimiseSettings triggers per-component LAMMPS runs.
+    settings = minimise if minimise is not None else MinimiseSettings(enabled=False)
     relaxed: Dict[int, list] = {}
     reports: List[str] = []
     if getattr(settings, "enabled", False):
@@ -456,7 +465,7 @@ def replicate_blend(
                                 packmol_path=packmol_path, regions=regions):
         raise RuntimeError(
             "packmol failed to produce packed_blend.pdb. "
-            "Check packmol.log in the output directory.")
+            f"Check the packmol input/log in {work}.")
     coords = _read_xyz_or_pdb_coords(packed_pdb)
 
     # Split coords into per-component slices, in the same order packmol

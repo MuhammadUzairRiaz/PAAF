@@ -50,8 +50,8 @@ class LayerSpec:
     count: int                            # copies packed into this layer
     size: Tuple[float, float, float]      # the layer's own Lx, Ly, Lz (Å)
     #: Explicit lower-corner origin (Å). ``None`` = auto: stacked along the
-    #: chosen axis after the previous layer plus the gap, centred on the
-    #: other two axes.
+    #: chosen axis after the previous layer plus the gap, anchored at 0 on
+    #: the other two axes (pin an origin to centre a narrower layer).
     origin: Optional[Tuple[float, float, float]] = None
     forcefield_input: Optional[Path] = None   # lammps.in with styles/coeffs
 
@@ -65,8 +65,8 @@ def plan_regions(
            Tuple[float, float, float]]:
     """Compute each layer's ``(x0,y0,z0,x1,y1,z1)`` region and the cell.
 
-    Auto-placed layers stack along ``axis``, ``gap`` Å apart, centred on the
-    two perpendicular axes of the final cell. When ``total_box`` is None the
+    Auto-placed layers stack along ``axis``, ``gap`` Å apart, anchored at 0
+    on the two perpendicular axes of the final cell. When ``total_box`` is None the
     cell is sized to hold everything: stacked extent along the axis, maximum
     layer size across it. Explicit origins are honoured verbatim, and any
     region that pokes out of the cell is refused with the numbers shown.

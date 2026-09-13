@@ -67,7 +67,9 @@ def solvate(
     ]
     packed, box_shape = pack_cell(
         specs,
-        density_kg_m3=density_kg_m3 or s["density"],
+        # An explicit box wins over the solvent's bulk density.
+        density_kg_m3=(density_kg_m3 if density_kg_m3 is not None
+                       else (None if box_ang is not None else s["density"])),
         box_ang=box_ang,
         out_path=out_path,
         seed=seed,

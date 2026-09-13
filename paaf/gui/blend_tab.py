@@ -742,19 +742,27 @@ class BlendTab(QWidget):
         self.log.emit(f"[blend] GROMACS: packing {len(comps)} components "
                       f"into {self.a.value():.1f}×{self.b.value():.1f}"
                       f"×{self.c.value():.1f} Å")
-        try:
-            gro, top = replicate_gromacs_blend(
-                comps, (self.a.value(), self.b.value(), self.c.value()),
-                out_dir, seed=int(self.seed.value()))
-        except Exception as e:
-            QMessageBox.critical(self, "Blend", str(e))
-            self.log.emit(f"[blend] FAILED: {e}")
-            return
-        self.log.emit(f"[blend] Wrote {gro} and {top}")
-        QMessageBox.information(
-            self, "Blend",
-            f"Packed blend written:\n{gro}\n{top}\n\n"
-            f"Run it with grompp/mdrun; equilibrate (NPT) before measuring.")
+        box = (self.a.value(), self.b.value(), self.c.value())
+        seed = int(self.seed.value())
+
+        def work(_progress):
+            return replicate_gromacs_blend(comps, box, out_dir, seed=seed)
+
+        def done(result):
+            gro, top = result
+            self.log.emit(f"[blend] Wrote {gro} and {top}")
+            QMessageBox.information(
+                self, "Blend",
+                f"Packed blend written:\n{gro}\n{top}\n\n"
+                f"Run it with grompp/mdrun; equilibrate (NPT) before measuring.")
+
+        def fail(msg):
+            self.log.emit(f"[blend] FAILED: {msg}")
+            QMessageBox.critical(self, "Blend", msg.split("\n\n")[0])
+
+        from .background import run_in_background
+        self._last_run = run_in_background(self, work, on_done=done, on_fail=fail,
+                                           busy_widget=self.pack_btn)
 
     def _pack(self) -> None:
         if self._is_gromacs():
@@ -792,29 +800,37 @@ class BlendTab(QWidget):
         self.log.emit(f"[blend] Packing {len(components)} components into "
                       f"{self.a.value():.1f}×{self.b.value():.1f}×{self.c.value():.1f} Å")
         from ..blend_minimise import MinimiseSettings
-        try:
-            path = replicate_blend(
-                components,
-                box_edges=(self.a.value(), self.b.value(), self.c.value()),
-                out_data_file=out_data,
-                out_input_file=out_in,
-                seed=int(self.seed.value()),
-                tolerance=float(self.tol.value()),
-                minimise=MinimiseSettings(enabled=self.do_min.isChecked()),
-                max_bond_length=3.0,
-                progress=lambda m: self.log.emit(f"[blend] {m}"),
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Blend", f"Pack failed:\n{e}")
-            self.log.emit(f"[blend] ERROR: {e}")
-            return
-        self.log.emit(f"[blend] Wrote {path}")
-        if out_in is not None:
-            self.log.emit(f"[blend] Wrote {out_in}")
-        QMessageBox.information(self, "Blend",
-            f"Wrote {path.name}"
-            + (f" and {out_in.name}" if out_in else "")
-            + f"\n\nin {out_dir}")
+        box = (self.a.value(), self.b.value(), self.c.value())
+        seed = int(self.seed.value())
+        tol = float(self.tol.value())
+        minimise = MinimiseSettings(enabled=self.do_min.isChecked())
+
+        # Runs on a worker thread: packmol and per-component LAMMPS
+        # minimisation can take minutes and would otherwise freeze the window.
+        def work(progress):
+            return replicate_blend(
+                components, box_edges=box, out_data_file=out_data,
+                out_input_file=out_in, seed=seed, tolerance=tol,
+                minimise=minimise, max_bond_length=3.0,
+                progress=lambda m: progress(f"[blend] {m}"))
+
+        def done(path):
+            self.log.emit(f"[blend] Wrote {path}")
+            if out_in is not None:
+                self.log.emit(f"[blend] Wrote {out_in}")
+            QMessageBox.information(self, "Blend",
+                f"Wrote {Path(path).name}"
+                + (f" and {out_in.name}" if out_in else "")
+                + f"\n\nin {out_dir}")
+
+        def fail(msg):
+            self.log.emit(f"[blend] ERROR: {msg}")
+            QMessageBox.critical(self, "Blend", f"Pack failed:\n{msg.split(chr(10) * 2)[0]}")
+
+        from .background import run_in_background
+        self._last_run = run_in_background(self, work, on_done=done, on_fail=fail,
+                                           on_progress=self.log.emit,
+                                           busy_widget=self.pack_btn)
 
 
 # ---------------------------------------------------------------- naming

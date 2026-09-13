@@ -8,17 +8,10 @@ def launch() -> int:
     try:
         from PyQt5.QtWidgets import QApplication
         from PyQt5.QtCore import QLocale
-    except Exception:
-        try:
-            from PySide2.QtWidgets import QApplication  # type: ignore
-            from PySide2.QtCore import QLocale          # type: ignore
-        except Exception as exc:
-            print(
-                "PyQt5 (or PySide2) is required for the GUI.\n"
-                "Install with: pip install PyQt5",
-                file=sys.stderr,
-            )
-            raise SystemExit(1) from exc
+    except Exception as exc:
+        print("PyQt5 is required for the GUI. Install with: pip install PyQt5",
+              file=sys.stderr)
+        raise SystemExit(1) from exc
 
     # ---- Qt web engine: both of these MUST happen before the QApplication --
     #

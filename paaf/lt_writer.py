@@ -168,7 +168,10 @@ def write_system_lt(
     lines: List[str] = []
     lines.append(f'import "{Path(chain_lt).name}"')
     lines.append("")
-    lx, ly, lz = box
+    # (lx, ly, lz) or (lx, ly, lz, xy, xz, yz) for a triclinic cell
+    box = [float(x) for x in box]
+    lx, ly, lz = box[:3]
+    tilt = box[3:6] if len(box) >= 6 else [0.0, 0.0, 0.0]
     if n_chains <= 1:
         lines.append(f"chains = new {chain_stem}")
     else:
@@ -196,6 +199,8 @@ def write_system_lt(
     lines.append(f"    0.0 {lx:.4f} xlo xhi")
     lines.append(f"    0.0 {ly:.4f} ylo yhi")
     lines.append(f"    0.0 {lz:.4f} zlo zhi")
+    if any(abs(t) > 1e-9 for t in tilt):
+        lines.append(f"    {tilt[0]:.4f} {tilt[1]:.4f} {tilt[2]:.4f} xy xz yz")
     lines.append("}")
     fname.write_text("\n".join(lines) + "\n")
     log.info("Wrote system .lt %s", fname)

@@ -65,18 +65,30 @@ def find_clashes(mol: Molecule, nonbonded_factor: float = 1.15,
         return [], []
     el = mol.elements()
     r = np.array([_rcov(e) for e in el])
-    rsum = r[:, None] + r[None, :]
-    d = np.linalg.norm(xyz[:, None, :] - xyz[None, :, :], axis=-1)
-    bonded = np.zeros((n, n), dtype=bool)
+    xyz = np.asarray(xyz, dtype=float)
+    # Neighbour search instead of dense N×N arrays: memory stays linear in N.
+    bonded = set()
     bad_bonds: List[Tuple[int, int, float]] = []
     for i, j, _ in mol.bonds:
-        bonded[i, j] = bonded[j, i] = True
-        if d[i, j] > bond_stretch * rsum[i, j] or d[i, j] < 0.6 * rsum[i, j]:
-            bad_bonds.append((i, j, float(d[i, j])))
-    close = (d < nonbonded_factor * rsum) & ~bonded
-    np.fill_diagonal(close, False)
-    ii, jj = np.where(np.triu(close))
-    clashes = [(int(i), int(j), float(d[i, j])) for i, j in zip(ii, jj)]
+        bonded.add((min(i, j), max(i, j)))
+        dij = float(np.linalg.norm(xyz[i] - xyz[j]))
+        rs = r[i] + r[j]
+        if dij > bond_stretch * rs or dij < 0.6 * rs:
+            bad_bonds.append((i, j, dij))
+    from scipy.spatial import cKDTree
+    pairs = cKDTree(xyz).query_pairs(nonbonded_factor * 2.0 * float(r.max()),
+                                     output_type="ndarray")
+    clashes: List[Tuple[int, int, float]] = []
+    if len(pairs):
+        ii, jj = pairs[:, 0], pairs[:, 1]
+        swap = ii > jj
+        ii, jj = np.where(swap, jj, ii), np.where(swap, ii, jj)
+        d = np.linalg.norm(xyz[ii] - xyz[jj], axis=1)
+        keep = d < nonbonded_factor * (r[ii] + r[jj])
+        for i, j, dij in zip(ii[keep], jj[keep], d[keep]):
+            if (int(i), int(j)) not in bonded:
+                clashes.append((int(i), int(j), float(dij)))
+        clashes.sort()
     return clashes, bad_bonds
 
 

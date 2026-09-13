@@ -230,6 +230,8 @@ def test_force_field_page_names_the_route_it_will_take():
     t = _tab()
     seen = set()
     for i in range(t.ff_combo.count()):
+        if t.ff_combo.itemData(i) is None:
+            continue                      # group header row, not selectable
         t.ff_combo.setCurrentIndex(i)
         text = t.ff_route.text()
         assert text.startswith("Route:")

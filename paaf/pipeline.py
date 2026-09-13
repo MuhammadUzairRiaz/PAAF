@@ -49,32 +49,27 @@ def _hoist_dlfield_outputs(out_dir: Path, engine: str) -> list[Path]:
     # Glob matches: lammpsN.data / lammpsN.in / *.mdp
     lammps_data_files = sorted(dlf.glob("lammps*.data"))
     lammps_in_files   = sorted(dlf.glob("lammps*.in"))
-    for src in lammps_data_files + lammps_in_files:
-        dst = out_dir / src.name
+    def _copy(src: Path, dst: Path) -> None:
+        # Remove the old file first: a failed copy must not leave a stale
+        # lammps.data from a previous run as the one users open.
         try:
-            shutil.copy2(src, dst); hoisted.append(dst)
-        except Exception:
-            pass
+            if dst.exists():
+                dst.unlink()
+            shutil.copy2(src, dst)
+            hoisted.append(dst)
+        except OSError as exc:
+            log.warning("Could not copy %s -> %s: %s", src, dst, exc)
+
+    for src in lammps_data_files + lammps_in_files:
+        _copy(src, out_dir / src.name)
     # Convenience aliases for the single-copy common case
     if len(lammps_data_files) == 1:
-        try:
-            shutil.copy2(lammps_data_files[0], out_dir / "lammps.data")
-            hoisted.append(out_dir / "lammps.data")
-        except Exception:
-            pass
+        _copy(lammps_data_files[0], out_dir / "lammps.data")
     if len(lammps_in_files) == 1:
-        try:
-            shutil.copy2(lammps_in_files[0], out_dir / "lammps.in")
-            hoisted.append(out_dir / "lammps.in")
-        except Exception:
-            pass
+        _copy(lammps_in_files[0], out_dir / "lammps.in")
 
     for src in sorted(dlf.glob("*.mdp")):
-        dst = out_dir / src.name
-        try:
-            shutil.copy2(src, dst); hoisted.append(dst)
-        except Exception:
-            pass
+        _copy(src, out_dir / src.name)
     return hoisted
 
 
@@ -156,6 +151,9 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                 steps=cfg.optimizer.steps,
                 tol=cfg.optimizer.tol,
                 algorithm=cfg.optimizer.algorithm,
+                report_energy=getattr(cfg.optimizer, "report_energy", True),
+                fallback=getattr(cfg.optimizer, "fallback", True),
+                strict=not getattr(cfg.optimizer, "fallback", True),
                 cancel=cancel,
             )
         structure.write(m.molecule, out_dir / f"{m.name}_opt.xyz")
@@ -175,6 +173,10 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
         seed=cfg.chain.seed,
         backend=cfg.chain.backend,
         cap_carboxyl_end=getattr(cfg.chain, "cap_carboxyl_end", True),
+        # Step 3 below minimises with the user's Optimize-page settings; no
+        # hidden extra pass inside the builder.
+        optimize=False,
+        cancel=cancel,
     )
     chain.name = cfg.project_name
     structure.write(chain, out_dir / f"{cfg.project_name}.mol2")
@@ -187,6 +189,9 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
     if cfg.optimizer.enabled:
         optimizer.optimize(chain, ff=cfg.optimizer.ff, steps=cfg.optimizer.steps,
                            tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm,
+                report_energy=getattr(cfg.optimizer, "report_energy", True),
+                fallback=getattr(cfg.optimizer, "fallback", True),
+                strict=not getattr(cfg.optimizer, "fallback", True),
                            cancel=cancel)
         structure.write(chain, out_dir / f"{cfg.project_name}_opt.xyz")
 
@@ -207,6 +212,9 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
             _p("Re-optimising the repaired chain")
             optimizer.optimize(chain, ff=cfg.optimizer.ff, steps=cfg.optimizer.steps,
                                tol=cfg.optimizer.tol, algorithm=cfg.optimizer.algorithm,
+                report_energy=getattr(cfg.optimizer, "report_energy", True),
+                fallback=getattr(cfg.optimizer, "fallback", True),
+                strict=not getattr(cfg.optimizer, "fallback", True),
                                cancel=cancel)
             if not is_clean(chain):
                 _geom_ok = ensure_clean_geometry(chain, _p, seed=int(cfg.chain.seed or 7) + 1,
@@ -261,10 +269,11 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
     # wrote two backbone carbons with hydrogen's mass. Check the final types,
     # whatever produced them.
     if ff.kind == "moltemplate_native":
-        from .type_guard import check_all
+        from .type_guard import check_all, elements_for_ff
         _problems = check_all({a.index: a.element for a in chain.atoms},
                               {a.index: a.ff_type for a in chain.atoms
-                               if a.ff_type})
+                               if a.ff_type},
+                              elements_for_ff(ff.key))
         if _problems:
             _p("!" * 60)
             for _idx, _msg in _problems[:10]:
@@ -341,6 +350,13 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
         pseudo_specs = [PackSpec(molecule=chain, count=cfg.box.n_chains, name=chain.name)]
         box_shape = _shape_for_density(pseudo_specs, [chain], density_kg_m3,
                                        template=template)
+        if _hyb is not None and _hyb.removed_h:
+            # UA beads carry their absorbed hydrogens' mass; the element-mass
+            # sum above does not, so grow the volume to match.
+            from .cell.amorphous import _mass_of
+            _bare = max(_mass_of(chain), 1e-9)
+            box_shape = box_shape.scaled(
+                ((_bare + _hyb.removed_h * 1.008) / _bare) ** (1.0 / 3.0))
         _p(f"Box scaled to target density {cfg.box.density_g_cm3} g/cm³: {box_shape}")
 
     _stage(5, "Sizing the box")
@@ -382,8 +398,8 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                f"box is too small for its contents and packing will fail or "
                f"overlap. Check the Box page edge lengths (ANGSTROM).")
             _p("WARNING " + "=" * 52)
-    except Exception:
-        pass
+    except Exception as exc:
+        _p(f"WARNING: box density check could not be computed ({exc}).")
 
     # 5b. Fit the box to the chain and wrap coordinates so no atom falls
     # outside the cell (fixes chains protruding through the periodic box).
@@ -437,7 +453,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
             bond_type=(_hyb.bond_type if _hyb else None))
         system_lt = lt_writer.write_system_lt(
             out_dir, chain_lt, n_chains=1,
-            box=list(box_shape.bounding_box()),
+            box=list(box_shape.lammps_params()),
             name="system", ff=ff,
         )
         if _pack_after_mt:
@@ -642,7 +658,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                     from .lammps_replicator import replicate_single_chain
                     packed_data = replicate_single_chain(
                         single_data, n_chains_wanted,
-                        (box_shape.a, box_shape.b, box_shape.c),
+                        box_shape.lammps_params(),
                         out_dir / "packed_box.data",
                         packmol_path=getattr(cfg.box, "packmol_path", "") or None,
                         seed=int(getattr(cfg.box, "packmol_seed", -1)),
@@ -831,7 +847,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                         bond_type=_hyb.bond_type)
                     system_lt = lt_writer.write_system_lt(
                         out_dir, chain_lt, n_chains=1,
-                        box=list(box_shape.bounding_box()), name="system", ff=ff)
+                        box=list(box_shape.lammps_params()), name="system", ff=ff)
                     data_file = run_moltemplate(system_lt, work_dir=out_dir, cancel=cancel)
                 if _hyb is not None and _hyb.bead_masses:
                     from .ua_hybrid import patch_data_masses
@@ -845,7 +861,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                     from .lammps_replicator import replicate_single_chain
                     packed_data = replicate_single_chain(
                         Path(data_file), _n_chains_mt,
-                        (box_shape.a, box_shape.b, box_shape.c),
+                        box_shape.lammps_params(),
                         out_dir / "packed_box.data",
                         packmol_path=getattr(cfg.box, "packmol_path", "") or None,
                         seed=int(getattr(cfg.box, "packmol_seed", -1)),
@@ -904,9 +920,39 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
     except Exception as e:  # pragma: no cover - defensive
         _p(f"[blend] Skipped ({e.__class__.__name__}: {e})")
 
+    # Net-charge check on the data file users will actually run.
+    net_charge = None
+    _cands = [out_dir / "packed_box.data"]
+    if data_file:
+        _cands.insert(0, Path(data_file))
+    _cands += [out_dir / "lammps1.data", out_dir / "lammps.data",
+               out_dir / "system.data"]
+    for _cand in _cands:
+        if not _cand.exists():
+            continue
+        try:
+            from .cell.cell_export import data_file_charges
+            _q = data_file_charges(_cand)
+        except Exception as exc:
+            _p(f"WARNING: could not read charges from {_cand.name} ({exc})")
+            break
+        if _q is None:
+            continue
+        _n_at, net_charge, _qmax = _q
+        _p(f"Charges: {_n_at} atoms in {_cand.name}, net {net_charge:+.4f} e")
+        if abs(net_charge) > 0.05:
+            _p(f"WARNING: {_cand.name} carries a net charge of {net_charge:+.3f} e; "
+               f"with PPPM LAMMPS adds a neutralising background. Check manual "
+               f"type overrides / united-atom beads.")
+        elif _qmax == 0.0:
+            _p(f"WARNING: every charge in {_cand.name} is zero — electrostatics "
+               f"will be missing if this force field is meant to be charged.")
+        break
+
     return {
         "output_dir": str(out_dir),
         "engine": cfg.engine,
+        "net_charge": net_charge,
         "runner": ("dl_field" if ff.kind == "dlfield" else "moltemplate"),
         "monomer_files": [str(out_dir / f"{m.name}_opt.xyz") for m in monomers],
         "chain_lt": str(chain_lt),

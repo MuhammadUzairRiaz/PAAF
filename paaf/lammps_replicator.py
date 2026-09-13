@@ -249,7 +249,7 @@ def _pack_with_packmol(single_pdb: Path, n: int, box_edges: Tuple[float, float, 
 
     ``seed`` semantics:
       * ``seed >= 0`` — packmol uses that fixed seed → **same layout every run**
-      * ``seed < 0``  — PAAF picks a fresh time-based seed → **different every run**
+      * ``seed < 0``  — PAAF picks a fresh random seed → **different every run**
     """
     exe = _find_packmol(explicit=packmol_path)
     if exe is None:
@@ -262,7 +262,7 @@ def _pack_with_packmol(single_pdb: Path, n: int, box_edges: Tuple[float, float, 
     # reason users report "the packing looks the same every time".
     if seed is None or int(seed) < 0:
         seed = random.randint(1, 2_000_000_000)
-        log.info("packmol: using time-based random seed %d (pass a positive "
+        log.info("packmol: using random seed %d (pass a positive "
                  "seed on the Box page to reproduce a specific layout)", seed)
     inp = out_pdb.parent / "pack.inp"
     a, b, c = box_edges
@@ -276,7 +276,7 @@ def _pack_with_packmol(single_pdb: Path, n: int, box_edges: Tuple[float, float, 
         f"output {out_pdb}",
         f"structure {single_pdb}",
         f"  number {n}",
-        f"  inside box 0. 0. 0. {a:.4f} {b:.4f} {c:.4f}",
+        "  " + inset_box_region(tolerance, a, b, c),
         "end structure",
     ]
     inp.write_text("\n".join(lines) + "\n")
@@ -395,6 +395,18 @@ def _replicate_topology(topo_lines: List[str], natoms_chain: int, nchains: int) 
 
 
 # ================================================================ top-level
+def inset_box_region(tolerance: float, a: float, b: float, c: float) -> str:
+    """packmol ``inside box`` for an a×b×c cell, inset by tolerance/2 per face.
+
+    packmol knows no periodic boundary, so atoms at x≈0 and x≈a would
+    otherwise sit closer than the tolerance through it. The inset is capped at
+    a quarter of the shortest edge so a tiny box keeps some room.
+    """
+    t = min(float(tolerance) / 2.0, min(a, b, c) / 4.0)
+    return (f"inside box {t:.4f} {t:.4f} {t:.4f} "
+            f"{a - t:.4f} {b - t:.4f} {c - t:.4f}")
+
+
 def replicate_single_chain(
     single_data_file: Path,
     n_chains: int,
@@ -407,7 +419,14 @@ def replicate_single_chain(
 ) -> Path:
     """Given a single-chain LAMMPS data file, produce packed_box.data
     containing `n_chains` copies packed inside `box_edges` (Å).
+
+    ``box_edges`` is ``(a, b, c)`` or ``(lx, ly, lz, xy, xz, yz)``. With
+    non-zero tilts the chains are packed into lx × ly × lz and the header
+    carries the ``xy xz yz`` line, so the cell is the requested triclinic one.
     """
+    box_edges = tuple(float(x) for x in box_edges)
+    tilt = box_edges[3:6] if len(box_edges) >= 6 else (0.0, 0.0, 0.0)
+    box_edges = box_edges[:3]
     single_data_file = Path(single_data_file).resolve()
     out_data_file = Path(out_data_file).resolve()
     work = Path(tempfile.mkdtemp(prefix="paaf_pack_"))
@@ -487,6 +506,8 @@ def replicate_single_chain(
     out_lines.append(f"0.0 {a:.4f} xlo xhi")
     out_lines.append(f"0.0 {b:.4f} ylo yhi")
     out_lines.append(f"0.0 {c:.4f} zlo zhi")
+    if any(abs(t) > 1e-9 for t in tilt):
+        out_lines.append(f"{tilt[0]:.4f} {tilt[1]:.4f} {tilt[2]:.4f} xy xz yz")
     out_lines.append("")
 
     # Copy coefficient sections verbatim (Masses, Pair Coeffs, Bond Coeffs, etc.)

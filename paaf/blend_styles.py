@@ -92,6 +92,25 @@ class StyleMismatch(RuntimeError):
     """Components were typed with force fields that cannot be merged."""
 
 
+def _mix_rule(value: str) -> str:
+    """The ``mix`` keyword's argument in a pair_modify line, or ''."""
+    toks = str(value).split()
+    for k, tok in enumerate(toks[:-1]):
+        if tok == "mix":
+            return toks[k + 1]
+    return ""
+
+
+def _kspace_accuracy(value: str) -> float:
+    """Relative accuracy of a kspace_style line (``pppm 1.0e-4`` -> 1e-4)."""
+    for tok in str(value).split()[1:]:
+        try:
+            return float(tok)
+        except ValueError:
+            continue
+    return float("inf")
+
+
 @dataclass
 class StyleBlock:
     """The style directives read from one component's LAMMPS input."""
@@ -321,6 +340,31 @@ def merge_style_blocks(blocks: Sequence[StyleBlock],
                      "terms); using %s from the ones that have them.",
                      directive, ", ".join(sorted(distinct)))
 
+        if directive == "pair_modify" and len(distinct) > 1:
+            mixes = {n: _mix_rule(v) for n, v in values.items()}
+            if len({m for m in mixes.values() if m}) > 1:
+                detail = "\n".join(f"    {n}: pair_modify {v}"
+                                   for n, v in values.items())
+                raise StyleMismatch(
+                    f"Components use different LJ mixing rules, so cross "
+                    f"interactions would depend on which one came first:\n"
+                    f"{detail}\nRe-type every component with the same force "
+                    f"field, then blend.")
+
+        if directive == "kspace_style" and len(distinct) > 1:
+            kinds = {_normalise(v).split()[0] for v in values.values()}
+            best = min(values.items(),
+                       key=lambda kv: _kspace_accuracy(kv[1]))
+            log.warning("Blend: components disagree on kspace_style (%s); "
+                        "taking the tightest accuracy: %s%s",
+                        ", ".join(f"{n}={_normalise(v)}"
+                                  for n, v in values.items()),
+                        _normalise(best[1]),
+                        "" if len(kinds) == 1 else
+                        " (different solvers — check this is what you want)")
+            merged.directives[directive] = best[1]
+            continue
+
         if directive in _TAKE_SMALLEST and len(distinct) > 1:
             best = min(values.items(),
                        key=lambda kv: _leading_number(kv[1], float("inf")))
@@ -341,8 +385,16 @@ def merge_style_blocks(blocks: Sequence[StyleBlock],
                 f"{detail}\n"
                 f"Re-type every component with the same force field, then "
                 f"blend.")
-        merged.directives[directive] = values[usable[0][0]] \
+        chosen = values[usable[0][0]] \
             if usable[0][0] in values else next(iter(values.values()))
+        if len(distinct) > 1:
+            log.warning("Blend: components disagree on %s (%s); using %s "
+                        "from the first component",
+                        directive,
+                        ", ".join(f"{n}={_normalise(v)}"
+                                  for n, v in values.items()),
+                        _normalise(chosen))
+        merged.directives[directive] = chosen
 
     substyles: Dict[str, str] = {}
     for directive in ("pair_style", "bond_style", "angle_style",

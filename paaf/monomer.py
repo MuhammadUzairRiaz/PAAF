@@ -411,6 +411,17 @@ def monomer_from_file(
             poly_smiles = None
 
     if head is not None and tail is not None:
+        n_atoms = len(mol.atoms)
+        for label, value in (("head", head), ("tail", tail),
+                             ("head_h", head_h), ("tail_h", tail_h)):
+            if value is not None and value != 0 and not 1 <= int(value) <= n_atoms:
+                raise ValueError(
+                    f"{label}={value} is out of range for {mol.name} "
+                    f"({n_atoms} atoms); link indices are 1-based.")
+        if not 1 <= int(head) <= n_atoms or not 1 <= int(tail) <= n_atoms:
+            raise ValueError(
+                f"head={head}, tail={tail} must be 1-based atom indices "
+                f"between 1 and {n_atoms} for {mol.name}.")
         h_idx = head - 1
         t_idx = tail - 1
         head_removes = [head_h - 1] if head_h else []

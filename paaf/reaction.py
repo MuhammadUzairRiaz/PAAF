@@ -157,6 +157,10 @@ class ReactionTemplate:
     evidence: Dict[int, str] = field(default_factory=dict)
     # reactive-site markers, useful for the xlink engine
     reactive_sites: List[Dict] = field(default_factory=list)
+    # bonds kept by the reaction but with a new order: (ra, rb, old, new)
+    changed_bonds: List[Tuple[int, int, float, float]] = field(default_factory=list)
+    # product bond order of each entry in created_bonds (same order)
+    created_bond_orders: List[float] = field(default_factory=list)
 
     def summary(self) -> str:
         return (
@@ -178,6 +182,8 @@ class ReactionTemplate:
             "element_changes": list(self.element_changes),
             "evidence": {str(k): v for k, v in self.evidence.items()},
             "reactive_sites": list(self.reactive_sites),
+            "changed_bonds": [list(b) for b in self.changed_bonds],
+            "created_bond_orders": list(self.created_bond_orders),
         }
 
     @classmethod
@@ -194,6 +200,8 @@ class ReactionTemplate:
             element_changes=list(d.get("element_changes", [])),
             evidence={int(k): v for k, v in d.get("evidence", {}).items()},
             reactive_sites=list(d.get("reactive_sites", [])),
+            changed_bonds=[tuple(x) for x in d.get("changed_bonds", [])],
+            created_bond_orders=[float(x) for x in d.get("created_bond_orders", [])],
         )
 
 
@@ -250,11 +258,19 @@ def extract_template(
             deleted_bonds.append((a, b))
 
     created_bonds: List[Tuple[int, int]] = []
-    for a, b, _ in p.bonds:
+    created_orders: Dict[Tuple[int, int], float] = {}
+    r_order = {frozenset((x, y)): float(o) for x, y, o in r.bonds}
+    changed_bonds: List[Tuple[int, int, float, float]] = []
+    for a, b, o in p.bonds:
         if a in inv and b in inv:
             ra, rb = inv[a], inv[b]
-            if not any((ra == x and rb == y) or (ra == y and rb == x) for x, y, _ in r.bonds):
+            old = r_order.get(frozenset((ra, rb)))
+            if old is None:
                 created_bonds.append((ra, rb))
+                created_orders[tuple(sorted((ra, rb)))] = float(o)
+            elif abs(old - float(o)) > 1e-6:
+                # C=C -> C-C, C=O -> C-O: the bond survives, its order does not.
+                changed_bonds.append((min(ra, rb), max(ra, rb), old, float(o)))
 
     elem_changes: List[Dict] = []
     for ri, pj in sorted(mapping.items()):
@@ -271,11 +287,22 @@ def extract_template(
     site_atoms = set()
     for a, b in deleted_bonds + created_bonds:
         site_atoms.add(a); site_atoms.add(b)
-    reactive_sites = [
-        {"reactant_atom": a, "element": r.atoms[a].element,
-         "n_neighbors": len(r.neighbors(a))}
-        for a in sorted(site_atoms) if a < len(r.atoms)
-    ]
+    for a, b, _o, _n in changed_bonds:
+        site_atoms.add(a); site_atoms.add(b)
+    site_atoms = {a for a in site_atoms if a < len(r.atoms)}
+    reactive_sites = []
+    for a in sorted(site_atoms):
+        nbrs = r.neighbors(a)
+        reactive_sites.append({
+            "reactant_atom": a, "element": r.atoms[a].element,
+            "n_neighbors": len(nbrs),
+            # Stored so the xlink engine never has to re-read the reactant
+            # (which may be SMILES text, not a file).
+            "signature": [r.atoms[a].element, len(nbrs),
+                          sorted(r.atoms[j].element for j in nbrs)],
+            "bonded_sites": sorted(j for j in nbrs if j in site_atoms),
+        })
+    created_sorted = sorted(created_bonds)
 
     return ReactionTemplate(
         name=name,
@@ -285,10 +312,13 @@ def extract_template(
         deleted_atoms=deleted_atoms,
         new_product_atoms=new_product_atoms,
         deleted_bonds=sorted(deleted_bonds),
-        created_bonds=sorted(created_bonds),
+        created_bonds=created_sorted,
         element_changes=elem_changes,
         evidence=dict(evidence),
         reactive_sites=reactive_sites,
+        changed_bonds=sorted(changed_bonds),
+        created_bond_orders=[created_orders.get(tuple(sorted(b)), 1.0)
+                             for b in created_sorted],
     )
 
 

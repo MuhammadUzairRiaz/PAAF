@@ -178,7 +178,10 @@ def test_the_branch_keeps_its_own_force_field():
     rs = w.builder_tab.reaction_scheme
     pipeline_ff = w.ff_combo.currentData()
 
-    rs.rx_ff_combo.setCurrentIndex(0)
+    # Row 0 is a group heading (no data); pick the first real force field.
+    first = next(i for i in range(rs.rx_ff_combo.count())
+                 if rs.rx_ff_combo.itemData(i) is not None)
+    rs.rx_ff_combo.setCurrentIndex(first)
     assert rs.rx_ff_combo.currentData() != pipeline_ff or rs.rx_ff_combo.count() == 1
     assert w.ff_combo.currentData() == pipeline_ff      # pipeline untouched
 
@@ -209,10 +212,12 @@ def test_three_steps_with_their_own_actions():
     assert [tab.steps.tabText(i) for i in range(tab.steps.count())] == [
         "1 · Scheme", "2 · Force field", "3 · Export"]
 
+    # isVisible() is False for any widget whose window was never shown;
+    # isVisibleTo(tab) checks the tab's own show/hide decision.
     tab.steps.setCurrentIndex(0)
-    assert tab.b_validate.isVisible() and not tab.b_export.isVisible()
+    assert tab.b_validate.isVisibleTo(tab) and not tab.b_export.isVisibleTo(tab)
     tab.steps.setCurrentIndex(2)
-    assert tab.b_export.isVisible() and not tab.b_validate.isVisible()
+    assert tab.b_export.isVisibleTo(tab) and not tab.b_validate.isVisibleTo(tab)
 
 
 def test_export_preview_lists_one_folder_per_reaction():

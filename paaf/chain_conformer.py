@@ -90,6 +90,11 @@ class ConformerSettings:
     #: Below it the built geometry is kept, so a good mBuild chain is not
     #: overwritten with a generic one.
     straight_angle_threshold_deg: float = 150.0
+    #: An angle further than this from ``backbone_angle_deg`` is also replaced.
+    #: A 90° C–C–C is as unphysical as a straight line, and alternating
+    #: 90°/134° angles curl even an all-trans chain into a ring. sp2 and ester
+    #: angles (117–125°) from a good mBuild chain stay inside the window.
+    angle_tolerance_deg: float = 20.0
 
 
 @dataclass
@@ -430,9 +435,11 @@ def rebuild_backbone(molecule, settings: Optional[ConformerSettings] = None
     bonds = [float(np.linalg.norm(xyz[path[i + 1]] - xyz[path[i]]))
              for i in range(len(path) - 1)]
     angles = []
-    for i, value in enumerate(before):
-        if value >= settings.straight_angle_threshold_deg:
-            angles.append(settings.backbone_angle_deg)
+    ideal = settings.backbone_angle_deg
+    for value in before:
+        if (value >= settings.straight_angle_threshold_deg
+                or abs(value - ideal) > settings.angle_tolerance_deg):
+            angles.append(ideal)
             res.n_angles_fixed += 1
         else:
             angles.append(float(value))

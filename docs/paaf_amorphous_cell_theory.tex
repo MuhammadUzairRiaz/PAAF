@@ -631,7 +631,7 @@ joining it to the backbone. That rotation is exact --- every bond length, bond
 angle and internal torsion of the group is preserved, because the group moves
 as a body --- and it is the \emph{only} move that can help a ring. It is
 precisely the side-group torsion that growth does not sample, recovered here
-at negligible cost. Each rotatable group is scanned over 36 uniform angles and
+at negligible cost. Each rotatable group is scanned over 144 uniform angles and
 placed where a soft repulsive score against everything outside the group is
 smallest.
 
@@ -810,14 +810,16 @@ them first is stronger than being caught by them.
 
 \begin{enumerate}[label=\textbf{L\arabic*.}]
 
-\item \textbf{Construction only --- there is no energy minimisation.}
+\item \textbf{Minimisation is optional; equilibration is not done.}
 BIOVIA describes Amorphous Cell as two steps: an initial guess structure,
 \emph{followed by relaxation to a state of minimum potential
-energy}~\cite{biovia}. PAAF performs only the first. The geometric push-off of
-Section~\ref{sec:backmap} makes the structure safe to hand to a minimiser; it
-is not itself a minimisation and involves no force field. \emph{Users must
-minimise and equilibrate in LAMMPS before quoting any property from a PAAF
-cell.} This is the single largest gap between PAAF and a production tool.
+energy}~\cite{biovia}. PAAF builds the guess structure and can, when
+\emph{Relax} is ticked, run a relaxation with the real force field: a soft
+push-off followed by conjugate-gradient minimisation in LAMMPS, or steepest
+descent in GROMACS (\texttt{paaf/cell/relax.py}). The geometric push-off of
+Section~\ref{sec:backmap} is not itself a minimisation and involves no force
+field. PAAF does not run NPT equilibration: \emph{users must compress and
+equilibrate before quoting any property from a PAAF cell.}
 
 \item \textbf{Growth is at united-skeletal-atom resolution.}
 Theodorou and Suter place every pendant atom and sample side-group torsions

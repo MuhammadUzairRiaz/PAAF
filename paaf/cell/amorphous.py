@@ -95,6 +95,28 @@ class BoxShape:
         zs = [0.0, 0.0, 0.0, 0.0, cz, cz, cz, cz]
         return (max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
 
+    def lammps_params(self) -> Tuple[float, float, float, float, float, float]:
+        """``(lx, ly, lz, xy, xz, yz)`` in LAMMPS' restricted-triclinic form.
+
+        Orthogonal shapes return zero tilts. The rectangle lx × ly × lz is a
+        complete periodic cell of the same lattice, so chains packed into it
+        and written with these tilts describe the requested triclinic cell.
+        """
+        if self.shape == "cubic":
+            return (self.a, self.a, self.a, 0.0, 0.0, 0.0)
+        if self.shape == "orthorhombic":
+            return (self.a, self.b, self.c, 0.0, 0.0, 0.0)
+        from math import cos, radians, sqrt
+        al, be, ga = radians(self.alpha), radians(self.beta), radians(self.gamma)
+        lx = self.a
+        xy = self.b * cos(ga)
+        xz = self.c * cos(be)
+        ly = sqrt(max(self.b ** 2 - xy ** 2, 0.0))
+        yz = (self.b * self.c * cos(al) - xy * xz) / ly if ly > 0 else 0.0
+        lz = sqrt(max(self.c ** 2 - xz ** 2 - yz ** 2, 0.0))
+        clean = lambda v: 0.0 if abs(v) < 1e-9 else v
+        return (lx, ly, lz, clean(xy), clean(xz), clean(yz))
+
     def scaled(self, factor: float) -> "BoxShape":
         """Uniform scale of edge lengths (angles preserved)."""
         return BoxShape(
@@ -264,10 +286,14 @@ def _pack_with_packmol(
     # For triclinic we pack inside the bounding orthorhombic box; the
     # returned Molecule carries the triclinic cell vectors as metadata.
     bx, by, bz = box.bounding_box()
+    # Inset by tolerance/2 per face so packmol (no PBC) cannot put atoms on
+    # opposite faces closer than the tolerance through the periodic boundary.
+    t = round(min(float(tolerance) / 2.0, min(bx, by, bz) / 4.0), 4)
     if box.shape == "cubic":
-        region = f"inside cube 0. 0. 0. {box.a:.4f}"
+        region = f"inside cube {t} {t} {t} {box.a - 2 * t:.4f}"
     else:
-        region = f"inside box 0. 0. 0. {bx:.4f} {by:.4f} {bz:.4f}"
+        region = (f"inside box {t} {t} {t} "
+                  f"{bx - t:.4f} {by - t:.4f} {bz - t:.4f}")
     lines = [
         f"tolerance {tolerance}",
         f"seed {seed}",

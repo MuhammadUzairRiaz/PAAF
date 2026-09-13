@@ -25,7 +25,8 @@ force_field:
 
 box:
   n_chains: 5
-  size: [90, 90, 90]
+  shape: cubic
+  a: 90
 
 lammps:
   ensemble: npt

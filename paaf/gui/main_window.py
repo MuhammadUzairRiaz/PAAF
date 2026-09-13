@@ -84,6 +84,39 @@ def _parse_float(text: str, default: float = 0.0) -> float:
         return default
 
 
+def _strict_positive_int(text: str, label: str) -> int:
+    """Like :func:`_parse_int` but a typo is an error, not a silent default."""
+    s = (text or "").replace(" ", "").replace(",", "").strip()
+    try:
+        value = float(s)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label}: {text!r} is not a number.") from None
+    if value < 1 or value != int(value):
+        raise ValueError(f"{label} must be a whole number ≥ 1 (got {text!r}).")
+    return int(value)
+
+
+def _strict_positive_float(text: str, label: str) -> float:
+    s = (text or "").replace(" ", "").strip().lower()
+    try:
+        value = float(s)
+    except (TypeError, ValueError):
+        raise ValueError(f"{label}: {text!r} is not a number "
+                         f"(use scientific notation, e.g. 1.0e-6).") from None
+    if not value > 0:
+        raise ValueError(f"{label} must be greater than 0 (got {text!r}).")
+    return value
+
+
+def _number_list(text: str, cast, label: str):
+    items = [x.strip() for x in (text or "").split(",") if x.strip()]
+    try:
+        return [cast(x) for x in items] or None
+    except ValueError:
+        raise ValueError(f"{label}: {text!r} must be comma-separated "
+                         f"{'integers' if cast is int else 'numbers'}.") from None
+
+
 # =========================================================== worker thread
 class Worker(QObject):
     finished = pyqtSignal(dict)
@@ -112,7 +145,7 @@ class Worker(QObject):
 NAV_ITEMS = [
     ("Builder",        "Upload / SMILES / periodic table — Step 1"),
     ("Chain",          "Polymerize monomer into a chain — Step 2"),
-    ("Optimize",       "OpenBabel MMFF94 / UFF / GAFF — Step 3 (minimizes the full chain)"),
+    ("Optimize",       "OpenBabel MMFF94 / MMFF94s / UFF / Ghemical / GAFF — Step 3 (minimizes the full chain)"),
     ("Force field",    "OPLS-AA, GAFF, PCFF, COMPASS, ... — Step 4"),
     ("Box",            "Pack chains: shape, dimensions, g/cm³ density — Step 5"),
     ("Export",         "Generate LAMMPS / GROMACS topology files — Step 6"),
@@ -534,7 +567,7 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(20, 12, 20, 20); v.setSpacing(14)
 
         _intro = QLabel(
-            "<b>Chain — Step 3</b><br>"
+            "<b>Chain — Step 2</b><br>"
             "Homopolymer: one monomer repeated N times. "
             "Copolymer: 2 monomers with a chosen fraction and sequence mode "
             "(random / alternating / block)."
@@ -854,7 +887,7 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(20, 12, 20, 20); v.setSpacing(14)
 
         _intro = QLabel(
-            "<b>Optimizer — Step 2</b><br>"
+            "<b>Optimizer — Step 3</b><br>"
             "Geometry minimization via OpenBabel. Pick a force field, a step "
             "count preset (or type a custom value), and a convergence tolerance "
             "in scientific notation (e.g. <code>1.0e-6</code>)."
@@ -869,7 +902,22 @@ class MainWindow(QMainWindow):
 
         # Force field — combobox with the OpenBabel-supported list
         self.opt_ff = QComboBox()
-        self.opt_ff.addItems(["MMFF94", "MMFF94s", "UFF", "Ghemical", "GAFF"])
+        for name, tip in (
+                ("MMFF94", "Merck MMFF94: organic molecules (C, H, N, O, F, S, Cl, Br, I, P). Good default."),
+                ("MMFF94s", "MMFF94 with planar conjugated nitrogens; better for amides/anilines."),
+                ("UFF", "Universal force field: every element; rougher, never fails to type."),
+                ("Ghemical", "Tripos-like; fast, organic molecules."),
+                ("GAFF", "General AMBER force field (OpenBabel's typer, organic molecules).")):
+            self.opt_ff.addItem(name)
+            self.opt_ff.setItemData(self.opt_ff.count() - 1, tip, Qt.ToolTipRole)
+        self.opt_fallback = QCheckBox(
+            "If this force field cannot type the molecule, fall back to "
+            "MMFF94s → UFF → Ghemical")
+        self.opt_fallback.setChecked(True)
+        self.opt_fallback.setToolTip(wrap_tooltip(
+            "On: a failed setup is logged and the next force field is used.\n"
+            "Off: exactly the chosen force field is used, or the build stops "
+            "with an error saying it could not type the molecule."))
 
         # ---------- Max steps as an editable combobox with presets
         self.opt_steps = QComboBox(); self.opt_steps.setEditable(True)
@@ -905,6 +953,7 @@ class MainWindow(QMainWindow):
 
         f.addRow(self.opt_enabled)
         f.addRow("Force field", self.opt_ff)
+        f.addRow("", self.opt_fallback)
         f.addRow("Max steps", self.opt_steps)
         f.addRow("Convergence tol", self.opt_tol)
         f.addRow("Algorithm", self.opt_alg)
@@ -1105,8 +1154,8 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(20, 12, 20, 20); v.setSpacing(14)
         _lbl_e = QLabel(
             "<b>Export — Step 6</b><br>"
-            "Generates LAMMPS or GROMACS topology files. MD execution is off "
-            "by default — tick <i>Auto-run</i> below to also invoke the engine."
+            "Generates LAMMPS or GROMACS input files. PAAF does not run MD; "
+            "the <i>Also run moltemplate.sh</i> option only builds the topology."
         )
         _lbl_e.setWordWrap(True)
         v.addWidget(_lbl_e)
@@ -1223,7 +1272,8 @@ class MainWindow(QMainWindow):
             "GROMACS <code>system.gro</code> + <code>system.top</code> + "
             "<code>*.mdp</code>, via <code>dl_field</code>. "
             "<b>Always auto-runs</b> — dl_field is invoked as soon as you "
-            "click Generate files, regardless of the Auto-run checkbox. "
+            "click Generate files, regardless of the <i>Also run "
+            "moltemplate.sh</i> checkbox. "
             "dl_field writes <i>hybrid</i> styles; choose <b>Non-hybrid</b> "
             "above to also get plain-style copies in <code>non_hybrid/</code>."
             "<br><br>"
@@ -1721,18 +1771,24 @@ class MainWindow(QMainWindow):
                     manual_types[int(k.strip())] = v.strip()
                 except ValueError:
                     pass
-        fractions = [float(x) for x in self.chain_fractions.text().split(",") if x.strip()] or None
-        blocks = [int(x) for x in self.chain_blocks.text().split(",") if x.strip()] or None
+        fractions = _number_list(self.chain_fractions.text(), float, "Chain fractions")
+        blocks = _number_list(self.chain_blocks.text(), int, "Block sizes")
         seed_txt = self.chain_seed.text().strip()
+        if seed_txt and not seed_txt.lstrip("-").isdigit():
+            raise ValueError(f"Chain seed: {seed_txt!r} must be an integer.")
         return Config(
             project_name=self.project_name.text() or "polymer",
             output_dir=self.output_dir.text() or "output",
             monomers=monomers,
             optimizer=OptimizerCfg(
                 enabled=self.opt_enabled.isChecked(),
+                report_energy=self.opt_report_energy.isChecked(),
+                fallback=self.opt_fallback.isChecked(),
                 ff=self.opt_ff.currentText(),
-                steps=_parse_int(self.opt_steps.currentText(), default=10000),
-                tol=_parse_float(self.opt_tol.currentText(), default=1.0e-6),
+                steps=_strict_positive_int(self.opt_steps.currentText(),
+                                           "Optimizer max steps"),
+                tol=_strict_positive_float(self.opt_tol.currentText(),
+                                           "Optimizer convergence tolerance"),
                 algorithm=(self.opt_alg.currentData()
                            or self.opt_alg.currentText().split()[0]),
             ),
@@ -1834,6 +1890,8 @@ class MainWindow(QMainWindow):
             "\n".join(f"{k}:{v}" for k, v in cfg.force_field.manual_types.items())
         )
         self.opt_enabled.setChecked(cfg.optimizer.enabled)
+        self.opt_report_energy.setChecked(getattr(cfg.optimizer, "report_energy", True))
+        self.opt_fallback.setChecked(getattr(cfg.optimizer, "fallback", True))
         self.opt_ff.setCurrentText(cfg.optimizer.ff)
         # Comboboxes: setEditText for editable ones
         self.opt_steps.setCurrentText(
@@ -1944,8 +2002,18 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Cleared — start with a new monomer on the Builder page.", 6000)
         self._append_log("Cleared all steps. Output dir and DL_FIELD lib dir kept.")
 
+    def _config_or_warn(self):
+        """The config from the pages, or ``None`` after telling the user why not."""
+        try:
+            return self._build_config()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Check your settings", str(exc))
+            return None
+
     def _save_config(self) -> None:
-        cfg = self._build_config()
+        cfg = self._config_or_warn()
+        if cfg is None:
+            return
         p, _ = QFileDialog.getSaveFileName(self, "Save config", filter="YAML (*.yaml);;JSON (*.json)")
         if not p:
             return
@@ -1959,7 +2027,9 @@ class MainWindow(QMainWindow):
         self._append_log(f"Config loaded from {p}")
 
     def _start_run(self) -> None:
-        cfg = self._build_config()
+        cfg = self._config_or_warn()
+        if cfg is None:
+            return
         if not cfg.monomers:
             # Jump to Builder tab and highlight what's needed.
             self.sidebar.setCurrentRow(0)

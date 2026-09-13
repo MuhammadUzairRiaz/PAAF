@@ -807,7 +807,7 @@ def export_cell(
                 return exp
             exp.relax = relax_cell_gromacs(
                 bm.molecule, dims, gro, top, folder / "relax",
-                settings=rset, progress=emit)
+                settings=rset, progress=emit, cancel=cancel)
         else:
             init_f = settings_f = charges_f = ""
             styles = None
@@ -827,19 +827,30 @@ def export_cell(
                         try:
                             (folder / "relax").mkdir(parents=True, exist_ok=True)
                             shutil.copy2(work / f, folder / "relax" / f)
-                        except Exception:
-                            pass
+                        except OSError as exc:
+                            emit(f"WARNING: could not copy {f} into relax/ "
+                                 f"({exc}); the relax deck may not run.")
             if not init_f:
                 # DL_FIELD route: hunt for a companion input first, and only
                 # fall back to PAAF's table if there is none.
                 found = _find_dlfield_styles_file(folder / "_typing")
+                parsed = {}
                 if found is not None:
-                    init_f = found.name
-                    src = f"DL_FIELD's own {found.name}"
+                    # DL_FIELD's lammps.in carries units/read_data/pair_coeff
+                    # of its own, so it must NOT be included as an init file
+                    # (double read_data, coefficients lost after the soft
+                    # stage). Take only its style lines.
+                    from .relax import extract_style_lines
                     try:
-                        shutil.copy2(found, folder / "relax" / found.name)
-                    except Exception:
-                        pass
+                        for ln in extract_style_lines(found):
+                            tok = ln.split(None, 1)
+                            if len(tok) == 2:
+                                parsed[tok[0]] = tok[1].strip()
+                    except OSError as exc:
+                        emit(f"WARNING: could not read {found.name}: {exc}")
+                if parsed:
+                    styles = parsed
+                    src = f"DL_FIELD's own {found.name}"
                 else:
                     # Read the sub-styles out of the data file rather than
                     # look them up: DL_FIELD names each one in column 2 of
@@ -852,7 +863,7 @@ def export_cell(
                 bm.molecule, dims, exp.typed_data, folder / "relax",
                 settings=rset, init_file=init_f, settings_file=settings_f,
                 charges_file=charges_f, styles=styles, styles_source=src,
-                progress=emit)
+                progress=emit, cancel=cancel)
         exp.messages.extend(exp.relax.messages)
         if exp.relax.ran:
             # The relaxed structure supersedes the constructed one.

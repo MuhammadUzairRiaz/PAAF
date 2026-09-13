@@ -10,6 +10,10 @@ packmol is stubbed with a deterministic grid so the check runs anywhere. That
 exercises every line of the merge; only the placement differs.
 
     python scripts/check_blend.py [--density 1.0] [--pack-at 0.4]
+        [--component ENR=path/to/lammps1.data --component PBS=path/to/lammps1.data]
+
+Without --component the two components default to mta_output/{enr,pbs}.
+Exit codes: 0 PASS, 1 FAIL, 2 missing input files.
 """
 from __future__ import annotations
 
@@ -61,19 +65,27 @@ def main() -> int:
     ap.add_argument("--density", type=float, default=1.0)
     ap.add_argument("--pack-at", type=float, default=0.4)
     ap.add_argument("--chains", type=int, default=20)
+    ap.add_argument("--component", action="append", default=[],
+                    metavar="NAME=DATA",
+                    help="component name and typed LAMMPS data file; repeat")
     args = ap.parse_args()
 
-    comps = [
-        BlendComponent(name="ENR",
-                       data_file=ROOT / "mta_output/enr/lammps1.data",
-                       count=args.chains),
-        BlendComponent(name="PBS",
-                       data_file=ROOT / "mta_output/pbs/lammps1.data",
-                       count=args.chains),
-    ]
+    specs = args.component or [f"ENR={ROOT / 'mta_output/enr/lammps1.data'}",
+                               f"PBS={ROOT / 'mta_output/pbs/lammps1.data'}"]
+    comps = []
+    for spec in specs:
+        name, _, path = spec.partition("=")
+        if not path:
+            print(f"--component must be NAME=path, got {spec!r}")
+            return 2
+        comps.append(BlendComponent(name=name, data_file=Path(path).expanduser(),
+                                    count=args.chains))
+    if len(comps) < 2:
+        print("A blend needs at least two --component entries.")
+        return 2
     missing = [c.data_file for c in comps if not c.data_file.is_file()]
     if missing:
-        print("Missing component data files:")
+        print("Missing component data files (pass --component NAME=path):")
         for m in missing:
             print(f"  {m}")
         return 2
@@ -116,10 +128,13 @@ def main() -> int:
     print(f"\nData file: {data}")
     print(f"  {len(atoms)} atoms, {len(set(ids))} unique ids "
           f"({'OK' if len(ids) == len(set(ids)) else 'DUPLICATES'})")
+    id_set = set(ids)
+    dangling_total = 0
     for sect in ("Bonds", "Angles", "Dihedrals", "Impropers"):
         body = _clean(sections.get(sect))
         bad = sum(1 for l in body
-                  if any(int(t) not in set(ids) for t in l.split()[2:]))
+                  if any(int(t) not in id_set for t in l.split()[2:]))
+        dangling_total += bad
         print(f"  {sect:10} {len(body):6d} lines, {bad} dangling")
 
     hybrid = [s for s in ("Bond Coeffs", "Angle Coeffs", "Dihedral Coeffs",
@@ -134,11 +149,18 @@ def main() -> int:
     inp = out / "packed_blend.in"
     block = read_style_block(inp)
     required = ["pair_style", "bond_style", "angle_style", "dihedral_style",
-                "improper_style", "kspace_style", "special_bonds"]
+                "improper_style", "special_bonds"]
     absent = [d for d in required if d not in block.directives]
     print(f"\nInput file: {inp}")
     for d in required:
         print(f"  {d:15} {block.get(d) or '*** MISSING ***'}")
+    # kspace is only needed for charged force fields (TraPPE-UA has none).
+    charged = any(abs(float(l.split()[3])) > 1e-9 for l in atoms
+                  if len(l.split()) > 3)
+    print(f"  {'kspace_style':15} {block.get('kspace_style') or '(none)'}")
+    if charged and not block.get("kspace_style"):
+        print("  !! atoms carry charges but no kspace_style is set")
+        absent.append("kspace_style")
     code = [l.strip() for l in inp.read_text().splitlines()
             if l.strip() and not l.strip().startswith("#")]
     first_read = next(i for i, l in enumerate(code)
@@ -157,7 +179,7 @@ def main() -> int:
     print(f"  pair_coeff lines: {sum(1 for l in code if l.startswith('pair_coeff'))}")
 
     ok = (len(ids) == len(set(ids)) and not absent and not hybrid
-          and styles_before and coeffs_after)
+          and styles_before and coeffs_after and dangling_total == 0)
     print("\n" + ("PASS — the blend and its input are self-consistent."
                   if ok else "FAIL — see above."))
     return 0 if ok else 1

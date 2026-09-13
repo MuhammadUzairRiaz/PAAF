@@ -524,11 +524,34 @@ def read_gro_coordinates(gro_path: Path, n_atoms: int) -> Optional[np.ndarray]:
     return coords
 
 
+class _Proc:
+    """The part of ``subprocess.CompletedProcess`` the relax code reads."""
+
+    def __init__(self, returncode, stdout, stderr):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def _run_proc(cmd, cwd, timeout_s, cancel=None) -> _Proc:
+    """Run an external program so that Cancel kills it immediately.
+
+    Raises :class:`subprocess.TimeoutExpired` on timeout (what callers already
+    handle) and lets ``PackCancelled`` propagate.
+    """
+    from .packing import run_cancellable
+    try:
+        rc, out, err = run_cancellable(cmd, cwd=cwd, timeout_s=timeout_s,
+                                       cancel=cancel)
+    except TimeoutError as exc:
+        raise subprocess.TimeoutExpired(cmd, timeout_s) from exc
+    return _Proc(rc, out, err)
+
+
 def relax_cell_gromacs(molecule: Molecule, box_dims: Sequence[float],
                        gro_file: Path, top_file: Path, work_dir: str | Path,
                        settings: Optional[RelaxSettings] = None,
                        total_mass_amu: Optional[float] = None,
-                       progress: Optional[Callable[[str], None]] = None
+                       progress: Optional[Callable[[str], None]] = None,
+                       cancel=None,
                        ) -> RelaxResult:
     """Minimise with ``gmx grompp`` then ``gmx mdrun``.
 
@@ -568,9 +591,11 @@ def relax_cell_gromacs(molecule: Molecule, box_dims: Sequence[float],
               "-c", Path(gro_file).name, "-p", Path(top_file).name,
               "-o", "em.tpr", "-maxwarn", "3"]
     emit(f"  {' '.join(grompp[1:3])} …")
+    from .packing import PackCancelled
     try:
-        p1 = subprocess.run(grompp, cwd=str(work), capture_output=True,
-                            text=True, timeout=settings.timeout_s)
+        p1 = _run_proc(grompp, str(work), settings.timeout_s, cancel)
+    except PackCancelled:
+        raise
     except Exception as exc:
         res.messages.append(f"gmx grompp could not be launched: {exc}")
         return res
@@ -583,9 +608,10 @@ def relax_cell_gromacs(molecule: Molecule, box_dims: Sequence[float],
 
     emit("  gmx mdrun …")
     try:
-        p2 = subprocess.run([str(gmx), "mdrun", "-deffnm", "em"],
-                            cwd=str(work), capture_output=True, text=True,
-                            timeout=settings.timeout_s)
+        p2 = _run_proc([str(gmx), "mdrun", "-deffnm", "em"], str(work),
+                       settings.timeout_s, cancel)
+    except PackCancelled:
+        raise
     except Exception as exc:
         res.messages.append(f"gmx mdrun could not be launched: {exc}")
         return res
@@ -777,6 +803,20 @@ def write_relax_input(out_dir: Path, data_file: str,
         L.append("# soft:  E = A [1 + cos(pi r / rc)]  -- finite at r = 0,")
         L.append("# which is the whole point. A is ramped 0 -> A_max so atoms")
         L.append("# that start on top of one another separate gently.")
+        _has_kspace = any(ln.split()[:1] == ["kspace_style"]
+                          for ln in (restore_lines or []))
+        if not _has_kspace and init_file:
+            try:
+                _init_txt = (Path(out_dir) / init_file).read_text() \
+                    if not Path(init_file).is_absolute() else Path(init_file).read_text()
+                _has_kspace = any(ln.split()[:1] == ["kspace_style"]
+                                  for ln in _init_txt.splitlines())
+            except (OSError, NameError):
+                pass
+        if _has_kspace:
+            # pair_style soft is incompatible with PPPM/Ewald; long-range
+            # electrostatics are switched off here and restored below.
+            L.append("kspace_style    none")
         L.append(f"pair_style      soft {settings.soft_cutoff}")
         # The prefactor MUST be given explicitly and start at zero; fix adapt
         # then ramps it. Omitting it leaves the coefficient unset.
@@ -934,7 +974,8 @@ def relax_cell(molecule: Molecule, box_dims: Sequence[float],
                styles: Optional[Dict[str, str]] = None,
                styles_source: str = "",
                total_mass_amu: Optional[float] = None,
-               progress: Optional[Callable[[str], None]] = None) -> RelaxResult:
+               progress: Optional[Callable[[str], None]] = None,
+               cancel=None) -> RelaxResult:
     """Push off, minimise, and read the relaxed coordinates back.
 
     ``molecule`` is updated **in place** with the relaxed coordinates when the
@@ -1007,9 +1048,11 @@ def relax_cell(molecule: Molecule, box_dims: Sequence[float],
     if settings.mpi_ranks > 1 and shutil.which("mpirun"):
         cmd = ["mpirun", "-np", str(settings.mpi_ranks)] + cmd
     emit(f"  running {' '.join(cmd)} …")
+    from .packing import PackCancelled
     try:
-        proc = subprocess.run(cmd, cwd=str(work), capture_output=True,
-                              text=True, timeout=settings.timeout_s)
+        proc = _run_proc(cmd, str(work), settings.timeout_s, cancel)
+    except PackCancelled:
+        raise
     except subprocess.TimeoutExpired:
         res.messages.append(
             f"LAMMPS exceeded the {settings.timeout_s} s timeout. The cell "

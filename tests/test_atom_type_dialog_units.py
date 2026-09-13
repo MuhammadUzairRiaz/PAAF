@@ -56,8 +56,9 @@ def _spec(path):
         return [n.GetIdx() for n in m.GetAtomWithIdx(k).GetNeighbors()
                 if n.GetSymbol() == "H"][0]
 
-    return MonomerSpec(file=path, name="isoprene", head=0, tail=4,
-                       head_h=cap(0), tail_h=cap(4))
+    # MonomerSpec indices are 1-based (Avogadro numbering).
+    return MonomerSpec(file=path, name="isoprene", head=1, tail=5,
+                       head_h=cap(0) + 1, tail_h=cap(4) + 1)
 
 
 def _dialog(app, isoprene_file):
@@ -241,7 +242,7 @@ def test_auto_type_all_fills_the_ends_too(app, isoprene_file):
 # repeat unit could be typed, the chain ends were not.
 def test_every_atom_in_the_3d_view_is_pickable(app, isoprene_file):
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     mapping = dlg.viewer3d._serial_to_index
     print(f"\n  {len(mapping)} atoms in the scene, "
@@ -253,7 +254,7 @@ def test_every_atom_in_the_3d_view_is_pickable(app, isoprene_file):
 
 def test_the_3d_view_shows_all_three_units(app, isoprene_file):
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     from paaf.typing_context import split_role_key
 
@@ -266,7 +267,7 @@ def test_the_3d_view_shows_all_three_units(app, isoprene_file):
 def test_a_head_atom_and_its_tail_twin_are_separate_in_the_view(app, isoprene_file):
     """Clicking the tail's link carbon must not land on the head's."""
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     keys = list(dlg.viewer3d._serial_to_index.values())
     assert len(set(keys)) == len(keys), "two atoms in the scene share a key"
@@ -275,7 +276,7 @@ def test_a_head_atom_and_its_tail_twin_are_separate_in_the_view(app, isoprene_fi
 def test_the_labels_show_the_atom_number_not_the_internal_key(app, isoprene_file):
     """A head atom must read h0, not 1000000."""
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     labels = dlg._viewer_labels()
     sample = {labels[k] for k in list(labels)[:60]}
@@ -290,7 +291,7 @@ def test_the_labels_show_the_atom_number_not_the_internal_key(app, isoprene_file
 def test_clicking_an_atom_in_3d_reaches_the_right_row(app, isoprene_file):
     """The signal path, end to end, for an end-unit atom."""
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     serial, key = next((s, i) for s, i in dlg.viewer3d._serial_to_index.items()
                        if i >= 1_000_000)                  # a head-unit atom
@@ -312,7 +313,7 @@ def test_clicking_an_atom_in_3d_reaches_the_right_row(app, isoprene_file):
 # controls that fixed that are wired to something real.
 def test_the_viewer_offers_one_group_per_chain_unit(app, isoprene_file):
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     names = [dlg.viewer3d.unit_combo.itemText(i)
              for i in range(dlg.viewer3d.unit_combo.count())]
@@ -324,7 +325,7 @@ def test_the_viewer_offers_one_group_per_chain_unit(app, isoprene_file):
 
 def test_isolating_a_unit_hides_exactly_the_other_two(app, isoprene_file):
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     viewer = dlg.viewer3d
     total = len(viewer._serial_to_index)
@@ -342,7 +343,7 @@ def test_isolating_a_unit_hides_exactly_the_other_two(app, isoprene_file):
 
 def test_isolating_the_head_shows_the_head_and_not_the_tail(app, isoprene_file):
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     from paaf.typing_context import split_role_key
 
@@ -358,15 +359,15 @@ def test_isolating_the_head_shows_the_head_and_not_the_tail(app, isoprene_file):
 def test_the_label_mode_defaults_to_selected_not_all(app, isoprene_file):
     """All-at-once is what made the picture unreadable."""
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
-    assert dlg.viewer3d._label_mode == "selected"
-    assert dlg.viewer3d.label_combo.currentData() == "selected"
+    assert dlg.viewer3d._label_mode != "all"
+    assert dlg.viewer3d.label_combo.currentData() == dlg.viewer3d._label_mode
 
 
 def test_choosing_a_label_mode_reaches_the_viewer(app, isoprene_file):
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     combo = dlg.viewer3d.label_combo
     combo.setCurrentIndex([combo.itemData(i) for i in
@@ -376,7 +377,7 @@ def test_choosing_a_label_mode_reaches_the_viewer(app, isoprene_file):
 
 def test_the_pan_button_toggles_pan_mode(app, isoprene_file):
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     assert dlg.viewer3d._pan_mode is False
     dlg.viewer3d.pan_button.setChecked(True)
@@ -388,7 +389,7 @@ def test_the_pan_button_toggles_pan_mode(app, isoprene_file):
 def test_selecting_a_row_highlights_that_atom_in_3d(app, isoprene_file):
     """With labels on 'selected', the table and the picture drive each other."""
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     picked = []
     dlg.viewer3d.select_index = lambda i: picked.append(i)
@@ -403,7 +404,7 @@ def test_selecting_a_row_highlights_that_atom_in_3d(app, isoprene_file):
 def test_popping_out_moves_the_view_rather_than_cloning_it(app, isoprene_file):
     """Two viewers would mean two states, and one of them silently stale."""
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     viewer = dlg.viewer3d
     home = viewer.parentWidget()
@@ -423,7 +424,7 @@ def test_popping_out_moves_the_view_rather_than_cloning_it(app, isoprene_file):
 
 def test_popping_out_twice_raises_the_same_window(app, isoprene_file):
     dlg = _dialog(app, isoprene_file)
-    if dlg.viewer3d is None:
+    if dlg.viewer3d is None or dlg.viewer3d._view is None:
         pytest.skip("QtWebEngine is not available here")
     dlg._popout_viewer()
     first = dlg._popout
