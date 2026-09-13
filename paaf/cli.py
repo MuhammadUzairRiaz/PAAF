@@ -245,9 +245,10 @@ def _build_molecule(ns: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         prog="paaf",
-        description="PAAF — Polymer Auto-Assembly Framework. "
-                    "Automated polymer builder, reactive-MD engine and "
-                    "Moltemplate / DL_FIELD / LAMMPS / GROMACS system generator.",
+        description="PAAF — Polymer Auto-Assembly Framework. Builds polymer "
+                    "chains, amorphous cells, blends and layered systems, types "
+                    "them with Moltemplate or DL_FIELD, and writes LAMMPS / "
+                    "GROMACS inputs.",
     )
     p.add_argument("--version", action="version", version=__version__)
     sub = p.add_subparsers(dest="cmd", required=True)

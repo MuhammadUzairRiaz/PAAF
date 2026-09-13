@@ -1,13 +1,15 @@
 # PAAF — Polymer Auto-Assembly Framework
 
-A desktop tool (PyQt5 GUI) that takes you from a monomer SMILES to a
-simulation-ready LAMMPS or GROMACS system, end to end:
+A desktop tool (PyQt5 GUI) and command-line interface that takes you from a
+monomer SMILES to a simulation-ready LAMMPS or GROMACS system, end to end:
 
 - **Pipeline (Builder → Chain → Optimize → Force field → Box → Export):**
-  build a monomer (SMILES, periodic table, or an uploaded XYZ/PDB/MOL2/SDF
-  file), polymerise it to a chain, optimise, assign a force field
-  (OPLS 2005 / PCFF / COMPASS / CVFF / CHARMM36 via DL_FIELD, or
-  OPLS-AA / GAFF via moltemplate), pack a box with packmol, export.
+  build a monomer (SMILES, the built-in polymer library, periodic table, or
+  an uploaded XYZ/PDB/MOL2/SDF file), polymerise it to a homopolymer or
+  alternating / block / random copolymer, optimise, assign a force field
+  (see [Force fields](#force-fields)), pack N chains into a cubic,
+  orthorhombic or triclinic box with packmol, export. Every long step can be
+  cancelled.
   The Export page shows a step-by-step progress bar, and for the
   dl_field route you can choose **hybrid** (as dl_field writes it) or
   **non-hybrid** LAMMPS styles (plain `bond_style harmonic`, written to
@@ -15,8 +17,12 @@ simulation-ready LAMMPS or GROMACS system, end to end:
 - **Amorphous cell:** grows chains bond-by-bond into a periodic box
   (Theodorou–Suter growth with RIS torsion statistics), back-maps to all
   atoms, resolves overlaps with a soft push-off, and types the finished
-  cell with DL_FIELD. Outputs `cell.data` + `cell.in` (LAMMPS) and/or
-  `cell.gro` + `cell.top` (GROMACS).
+  cell with DL_FIELD or moltemplate. Outputs `cell.data` + `cell.in`
+  (LAMMPS) and/or `cell.gro` + `cell.top` (GROMACS).
+- **Relaxation:** optional soft push-off + conjugate-gradient minimisation
+  of the typed cell in LAMMPS (both force-field routes), or steepest-descent
+  minimisation in GROMACS. Minimisation removes strained contacts; it does
+  not equilibrate — run NVT/NPT before measuring properties.
 - **Blend:** packs several pre-built, typed components into one box,
   merging their force fields safely (type offsets, refused conflicts).
 - **Layering:** like Blend, but each component is confined to its own
@@ -35,7 +41,25 @@ simulation-ready LAMMPS or GROMACS system, end to end:
   natively; TraPPE-UA via a generated `paaf_ua_bridge.lt`).
 - **Reaction scheme (inside Builder):** define reactions with atom-mapped
   SMILES (53 built-in worked examples), export typed reactant/product
-  structures and learned reaction templates.
+  structures and learned reaction templates. `paaf reactions-apply` applies
+  a learned library to a packed system (LAMMPS `.data`, PDB, GRO, XYZ,
+  MOL2), using minimum-image distances when the file carries a periodic box
+  or `--box A B C` is given. It edits topology only: re-type the result
+  before MD.
+- **Other builders (CLI):** crystal supercells, cleaved slabs, (n,m)
+  nanotubes, stacked layers and solvation boxes.
+
+### Force fields
+
+`paaf list-ffs` prints the full list. In short:
+
+| Route | Force fields |
+|---|---|
+| Moltemplate libraries (bundled, typed automatically) | OPLS-AA 2024 and 2008, L-OPLS-AA 2024 and 2008, OPLS-UA 2024, TraPPE-UA, GAFF / GAFF2, DREIDING, COMPASS (public parameters), PCFF / COMPASS / CVFF (converted from DL_FIELD), SDK, MARTINI / Dry MARTINI |
+| DL_FIELD (needs a DL_FIELD install) | OPLS 2005 / 2020 / AA-M / UA, CHARMM (19, 22, 36 families, CGenFF), AMBER / GAFF, GROMOS 54A7, TraPPE-EH / UA, DREIDING, ionic liquids, deep-eutectic solvents, inorganic sets (oxides, halides, clays, glasses, zeolites) |
+
+United-atom beads can be mixed into an all-atom chain (see below); each
+molecule is neutralised after the two libraries' charges are combined.
 
 ---
 
@@ -219,6 +243,19 @@ python run_paaf.py
 6. The cell is built loose (45 % of target density): minimise, then a
    short NPT run to compress to the target before measuring anything.
 
+### Command line
+
+```bash
+python run_cli.py list-ffs                                   # force fields
+python run_cli.py run examples/pbs_oplsaa_library.yaml       # pipeline from a config
+python run_cli.py build --monomer PBS.pdb --n 20 --n-chains 5 --ff oplsaa --output out/
+python run_cli.py reactions-apply --library lib.json --system packed_box.data \
+    --out crosslinked.xyz --cutoff 5
+```
+
+Run `python run_cli.py <command> -h` for every option; `pip install -e .`
+installs the same interface as `paaf`.
+
 ## 4. Running the tests
 
 ```bash
@@ -245,11 +282,20 @@ paaf/            the package (pipeline, cell/, gui/, reaction engine)
 paaf/cell/       amorphous cell: grow, backmap, push-off, export, relax
 paaf/gui/        PyQt5 pages, one module per tool
 ff_libraries/    bundled force-field data
+paaf/typers/     automatic atom typers (OPLS SMARTS, generic environment)
+ff_libraries/    bundled force-field data (moltemplate .lt libraries)
 tests/           pytest suite
+scripts/         end-to-end checks (relax deck, blend) and demos
 docs/            documentation and guides
-examples/        example inputs
+examples/        example YAML configs
 run_paaf.py      GUI launcher
+run_cli.py       command-line launcher (same as `paaf`)
 ```
+
+## License
+
+No license has been chosen yet, so all rights are reserved by the author
+until one is added.
 
 ## Author
 

@@ -26,3 +26,9 @@ venv/
 .idea/
 .vscode/
 zi1MWIm0
+
+# ---- generated files ----
+docs/*.aux
+docs/*.out
+docs/*.toc
+/crystal.xyz
