@@ -20,9 +20,8 @@ other program, PAAF:
    LAMMPS ``.data``/``.in`` or GROMACS ``.gro``/``.top``/``.mdp`` files.
 
 PAAF also ships an Amorphous cell builder (Theodorou-Suter chain growth, with
-copolymer sequences and LAMMPS/GROMACS relaxation), a Materials-Studio-style
-System Builder (crystal, surface/slab, nanotube, layers/interface, solvate)
-and a reaction learner for iterative crosslinking.
+copolymer sequences and LAMMPS/GROMACS relaxation), Blend and Layering
+builders, and a reaction learner for iterative crosslinking.
 
 The Python import name is kept as ``paaf`` for backwards
 compatibility with earlier releases; the product / brand name is **PAAF**.

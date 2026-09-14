@@ -42,7 +42,7 @@ def test_p36_legacy_box_size_maps_onto_edges():
 
 def test_p20_density_that_looks_like_g_cm3_is_refused(capsys):
     import paaf.cli as cli
-    rc = cli.main(["solvate", "--solute", "x.xyz", "--density", "1.0", "--out", "y.pdb"])
+    rc = cli.main(["pack-cell", "--species", "x.xyz:1", "--density", "1.0", "--out", "y.pdb"])
     assert rc == 2
     assert "g/cm" in capsys.readouterr().err
 
@@ -74,28 +74,6 @@ def test_p05_wrong_fraction_count_names_fractions():
     from paaf.chain_builder import _make_sequence
     with pytest.raises(ValueError, match="fractions"):
         _make_sequence(2, 10, "random", [0.5], None, 1)
-
-
-# ------------------------------------------------------------------ P10
-def test_p10_explicit_box_wins_over_solvent_density(monkeypatch):
-    import importlib
-    # paaf.cell re-exports a function called solvate, which shadows the module
-    sv = importlib.import_module("paaf.cell.solvate")
-    captured = {}
-
-    class _Shape:
-        a = 40.0
-
-    def fake_pack(specs, **kw):
-        captured.update(kw)
-        return None, _Shape()
-
-    monkeypatch.setattr(sv, "pack_cell", fake_pack)
-    pytest.importorskip("openbabel")
-    from paaf.structure import load_smiles
-    sv.solvate(load_smiles("CCO"), box_ang=40.0, n_solvent=5)
-    assert captured["density_kg_m3"] is None
-    assert captured["box_ang"] == 40.0
 
 
 # ------------------------------------------------------------------ P11
@@ -181,11 +159,9 @@ def test_p16_find_clashes_matches_the_dense_reference():
 
 
 # ------------------------------------------------------------------ P21
-def test_p21_one_layer_gap_default():
-    from paaf.cell.layers import build_layers
+def test_p21_layer_gap_default():
     from paaf.layering import plan_regions
-    assert inspect.signature(build_layers).parameters["gap_ang"].default == \
-        inspect.signature(plan_regions).parameters["gap"].default == 5.0
+    assert inspect.signature(plan_regions).parameters["gap"].default == 5.0
 
 
 # ------------------------------------------------------------------ P27

@@ -5,10 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from paaf.cell import (
-    build_preset, list_presets, cleave_surface, build_nanotube,
-    list_fragments, get_fragment,
-)
+from paaf.cell import list_fragments, get_fragment
 from paaf.cell.amorphous import (
     BoxShape, PackSpec, _box_from_density, _pack_grid, _mass_of,
     _shape_for_density,
@@ -26,34 +23,6 @@ def _tiny_water():
         bonds=[(0, 1, 1), (0, 2, 1)],
         name="H2O",
     )
-
-
-def test_crystal_presets_all_build():
-    """Every shipped crystal preset builds a 1x1x1 supercell without error."""
-    assert len(list_presets()) >= 15
-    for p in list_presets():
-        mol = build_preset(p.name, nx=1, ny=1, nz=1)
-        assert len(mol.atoms) >= 1
-
-
-def test_crystal_supercell_scales_correctly():
-    mol1 = build_preset("Cu", 1, 1, 1)
-    mol4 = build_preset("Cu", 2, 2, 2)
-    assert len(mol4.atoms) == 8 * len(mol1.atoms)
-
-
-def test_surface_cleaves_something():
-    slab = cleave_surface("Cu", (1, 0, 0), supercell=(3, 3, 3), thickness_ang=6.0)
-    assert 1 <= len(slab.atoms) <= 4 * 27
-
-
-def test_nanotube_66_armchair():
-    tube = build_nanotube(6, 6, length_ang=8.0)
-    # Should have >0 atoms and be roughly cylindrical
-    assert len(tube.atoms) >= 24
-    coords = tube.coords()
-    r = np.sqrt(coords[:, 0] ** 2 + coords[:, 1] ** 2)
-    assert r.std() < 0.5, f"tube not cylindrical: r std = {r.std()}"
 
 
 def test_pack_grid_and_density_math():
@@ -111,40 +80,6 @@ def test_fragments_library_populated():
     categories = {f.category for f in frags}
     for c in ("alkyl", "oxygen", "nitrogen", "aromatic", "halogen"):
         assert c in categories
-
-
-# ==================================================================== layers
-def test_layer_trilayer_stacks_in_z():
-    """A trilayer of Cu / graphene / Cu should stack strictly along Z with
-    each layer's minimum z > the previous layer's maximum z."""
-    from paaf.cell import build_layers, LayerSpec
-
-    stack, box = build_layers([
-        LayerSpec(preset="Cu",       supercell=(2, 2, 2), name="Cu_bot"),
-        LayerSpec(preset="graphene", supercell=(3, 3, 1), name="gr"),
-        LayerSpec(preset="Cu",       supercell=(2, 2, 2), name="Cu_top"),
-    ], gap_ang=3.0)
-    assert len(stack.atoms) > 30
-
-    # z monotonically increases across layer boundaries
-    zs = stack.coords()[:, 2]
-    assert zs.min() >= 0.0
-    assert zs.max() > 15.0
-    assert box[2] > zs.max()
-
-
-def test_layer_gap_before_overrides_default():
-    from paaf.cell import build_layers, LayerSpec
-
-    stack, box = build_layers([
-        LayerSpec(preset="Cu", supercell=(1, 1, 1), name="a"),
-        LayerSpec(preset="Cu", supercell=(1, 1, 1), name="b", gap_before=10.0),
-    ], gap_ang=2.0)
-    zs = stack.coords()[:, 2]
-    # There should be a large gap (>= 10 Å - epsilon) somewhere in z
-    sorted_zs = np.sort(zs)
-    gaps = np.diff(sorted_zs)
-    assert gaps.max() >= 8.0
 
 
 # ==================================================================== damping

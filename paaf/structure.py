@@ -267,7 +267,7 @@ def write(mol: Molecule, path: str | Path) -> Path:
     """Write a molecule to any OpenBabel-supported format.
 
     For plain-text formats (xyz, pdb) we can write natively without
-    OpenBabel — this lets the cell/crystal/nanotube builders produce output
+    OpenBabel — this lets the cell builders produce output
     on systems where OpenBabel is not installed.
     """
     path = Path(path)

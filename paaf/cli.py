@@ -96,91 +96,12 @@ def _pack_cell(ns: argparse.Namespace) -> int:
     return 0
 
 
-def _build_crystal(ns: argparse.Namespace) -> int:
-    from .cell import build_preset, list_presets
-    if ns.list:
-        for p in list_presets():
-            print(f"  {p.name:<15s} {p.description}")
-        return 0
-    if not ns.preset or not ns.out:
-        raise SystemExit("--preset and --out are required (use --list to see presets)")
-    from .structure import write
-    mol = build_preset(ns.preset, nx=ns.nx, ny=ns.ny, nz=ns.nz)
-    write(mol, ns.out)
-    print(f"Wrote {ns.out}  ({len(mol.atoms)} atoms)")
-    return 0
-
-
-def _build_slab(ns: argparse.Namespace) -> int:
-    from .cell import cleave_surface
-    from .structure import write
-    mol = cleave_surface(ns.preset, tuple(ns.hkl), supercell=tuple(ns.supercell),
-                        thickness_ang=ns.thickness, vacuum_ang=ns.vacuum)
-    write(mol, ns.out)
-    print(f"Wrote {ns.out}  ({len(mol.atoms)} atoms)")
-    return 0
-
-
-def _build_cnt(ns: argparse.Namespace) -> int:
-    from .cell import build_nanotube
-    from .structure import write
-    mol = build_nanotube(ns.n, ns.m, length_ang=ns.length, element=ns.element)
-    write(mol, ns.out)
-    print(f"Wrote {ns.out}  ({len(mol.atoms)} atoms)")
-    return 0
-
-
 def _extract_oplsua(ns: argparse.Namespace) -> int:
     from .oplsua_extractor import extract, default_source, default_dest
     src = ns.source or default_source()
     dst = ns.out or default_dest()
     p = extract(src, dst, object_name=ns.object_name)
     print(f"Wrote {p}")
-    return 0
-
-
-def _build_layers(ns: argparse.Namespace) -> int:
-    from .cell import build_layers, LayerSpec
-    specs = []
-    for raw in ns.layer:
-        parts = raw.split(":")
-        kind = parts[0].lower()
-        if kind == "file":
-            path = parts[1]
-            name = parts[2] if len(parts) > 2 else Path(path).stem
-            off = [0.0, 0.0]; gap = None
-            if len(parts) > 3 and parts[3]:
-                off = [float(x) for x in parts[3].split(",")]
-            if len(parts) > 4 and parts[4]:
-                gap = float(parts[4])
-            specs.append(LayerSpec(file=path, name=name,
-                                   lateral_offset=tuple(off), gap_before=gap))
-        elif kind == "preset":
-            preset = parts[1]; sc = (1, 1, 1)
-            if len(parts) > 2 and parts[2]:
-                sc = tuple(int(x) for x in parts[2].split(","))
-            off = [0.0, 0.0]; gap = None
-            if len(parts) > 3 and parts[3]:
-                off = [float(x) for x in parts[3].split(",")]
-            if len(parts) > 4 and parts[4]:
-                gap = float(parts[4])
-            specs.append(LayerSpec(preset=preset, supercell=sc, name=preset,
-                                   lateral_offset=tuple(off), gap_before=gap))
-        else:
-            raise SystemExit(f"--layer must start with 'file:' or 'preset:' (got {raw!r})")
-    mol, box = build_layers(specs, gap_ang=ns.gap, center_xy=not ns.no_center,
-                           out_path=ns.out)
-    print(f"Wrote {ns.out}  ({len(mol.atoms)} atoms, box={box[0]:.1f} x {box[1]:.1f} x {box[2]:.1f} Å)")
-    return 0
-
-
-def _solvate_cli(ns: argparse.Namespace) -> int:
-    if _density_looks_like_g_cm3(ns.density):
-        return 2
-    from .cell import solvate
-    mol, box = solvate(ns.solute, solvent=ns.solvent, n_solvent=ns.n_solvent,
-                      density_kg_m3=ns.density, box_ang=ns.box, out_path=ns.out)
-    print(f"Wrote {ns.out}  ({len(mol.atoms)} atoms, box={box:.2f} Å)")
     return 0
 
 
@@ -341,36 +262,6 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--out", type=Path, required=True)
     sp.set_defaults(func=_pack_cell)
 
-    # ---------- build-crystal
-    sp = sub.add_parser("build-crystal", help="Build a preset crystal supercell")
-    sp.add_argument("--preset", default=None,
-                    help="Cu, Al, Au, Fe, Si_diamond, NaCl, graphene, quartz_alpha, ...")
-    sp.add_argument("--nx", type=int, default=4)
-    sp.add_argument("--ny", type=int, default=4)
-    sp.add_argument("--nz", type=int, default=4)
-    sp.add_argument("--out", type=Path, default=None)
-    sp.add_argument("--list", action="store_true")
-    sp.set_defaults(func=_build_crystal)
-
-    # ---------- build-slab
-    sp = sub.add_parser("build-slab", help="Cleave a preset crystal along (hkl)")
-    sp.add_argument("--preset", required=True)
-    sp.add_argument("--hkl", nargs=3, type=int, default=[1, 0, 0])
-    sp.add_argument("--supercell", nargs=3, type=int, default=[5, 5, 5])
-    sp.add_argument("--thickness", type=float, default=12.0)
-    sp.add_argument("--vacuum", type=float, default=15.0)
-    sp.add_argument("--out", type=Path, required=True)
-    sp.set_defaults(func=_build_slab)
-
-    # ---------- build-cnt
-    sp = sub.add_parser("build-cnt", help="Build a (n,m) single-wall nanotube")
-    sp.add_argument("--n", type=int, required=True)
-    sp.add_argument("--m", type=int, required=True)
-    sp.add_argument("--length", type=float, default=20.0)
-    sp.add_argument("--element", default="C")
-    sp.add_argument("--out", type=Path, required=True)
-    sp.set_defaults(func=_build_cnt)
-
     # ---------- extract-oplsua
     sp = sub.add_parser("extract-oplsua",
                         help="Extract UA subset of oplsaa2024.lt into oplsua_2024.lt")
@@ -380,31 +271,6 @@ def main(argv: list[str] | None = None) -> int:
                     help="Output .lt path (default: ff_libraries/moltemplate/oplsua_2024.lt)")
     sp.add_argument("--object-name", default="OPLSUA_2024")
     sp.set_defaults(func=_extract_oplsua)
-
-    # ---------- build-layers
-    sp = sub.add_parser("build-layers",
-                        help="Stack N structures/presets along Z (bilayer/trilayer/interface)")
-    sp.add_argument("--layer", action="append", required=True,
-                    help="'file:path[:name[:offx,offy[:gap]]]' or "
-                         "'preset:name:nx,ny,nz[:offx,offy[:gap]]'; repeat")
-    sp.add_argument("--gap", type=float, default=5.0,
-                    help="default Z gap between layers (Å); same default as the GUI")
-    sp.add_argument("--no-center", action="store_true",
-                    help="Don't center layers on the largest xy footprint")
-    sp.add_argument("--out", type=Path, required=True)
-    sp.set_defaults(func=_build_layers)
-
-    # ---------- solvate
-    sp = sub.add_parser("solvate", help="Solvate a molecule with a chosen solvent")
-    sp.add_argument("--solute", type=Path, required=True)
-    sp.add_argument("--solvent", default="water")
-    sp.add_argument("--n-solvent", type=int, default=500)
-    sp.add_argument("--density", type=float, default=None,
-                    help="target density kg/m³ (e.g. 997 for water; GUI uses g/cm³)")
-    sp.add_argument("--box", type=float, default=None,
-                    help="cubic box side (Å); used instead of the solvent density")
-    sp.add_argument("--out", type=Path, required=True)
-    sp.set_defaults(func=_solvate_cli)
 
     # ---------- build-molecule
     sp = sub.add_parser("build-molecule",

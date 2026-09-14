@@ -46,8 +46,6 @@ monomer SMILES to a simulation-ready LAMMPS or GROMACS system, end to end:
   MOL2), using minimum-image distances when the file carries a periodic box
   or `--box A B C` is given. It edits topology only: re-type the result
   before MD.
-- **Other builders (CLI):** crystal supercells, cleaved slabs, (n,m)
-  nanotubes, stacked layers and solvation boxes.
 
 ### Force fields
 

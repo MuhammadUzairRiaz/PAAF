@@ -443,17 +443,9 @@ def test_p41_no_silent_broad_exception_handlers():
     assert not offenders, offenders
 
 
-# ------------------------------------------------------------------ P25 / P48
+# ------------------------------------------------------------------ P25
 def test_p25_readme_test_count_is_current():
     assert "About 1,900 tests" in (ROOT / "README.md").read_text()
-
-
-def test_p48_crystal_carries_its_supercell():
-    from paaf.cell.crystal import build_crystal
-    mol = build_crystal(4.0, 5.0, 6.0, basis=[("Si", (0, 0, 0))], nx=2, ny=3, nz=1)
-    cell = mol.cell
-    assert (cell.a, cell.b, cell.c) == (8.0, 15.0, 6.0)
-    assert cell.shape == "orthorhombic"
 
 
 # ------------------------------------------------------------------ P49

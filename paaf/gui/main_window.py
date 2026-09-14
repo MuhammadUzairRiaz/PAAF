@@ -51,8 +51,6 @@ from ..cell.packing import CancelToken
 from ..run_progress import parse_stage
 from .builder_tab import BuilderTab
 from .blend_tab import BlendTab
-# System builder is parked for now:
-# from .cell_tab import CellTab
 # Reactions tool is parked for now:
 # from .reactions_tab import ReactionsTab
 from . import theme
@@ -291,8 +289,8 @@ class MainWindow(QMainWindow):
         # -------- Independent tools (no Next/Back navigation) --------
         # Reactions tool parked — Layering is now page 6.
 
-        # System builder (CellTab) is parked; Layering takes its slot so
-        # every existing page index after it stays valid.
+        # Layering keeps this slot so every existing page index after it
+        # stays valid.
         from .layering_tab import LayeringTab
         self.layering_tab = LayeringTab()
         self.layering_tab.log.connect(self._append_log)
