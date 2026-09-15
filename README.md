@@ -4,8 +4,8 @@ A desktop tool (PyQt5 GUI) and command-line interface that takes you from a
 monomer SMILES to a simulation-ready LAMMPS or GROMACS system, end to end:
 
 - **Pipeline (Builder → Chain → Optimize → Force field → Box → Export):**
-  build a monomer (SMILES, the built-in polymer library, periodic table, or
-  an uploaded XYZ/PDB/MOL2/SDF file), polymerise it to a homopolymer or
+  build a monomer (SMILES, the built-in polymer library, or the
+  periodic-table builder), polymerise it to a homopolymer or
   alternating / block / random copolymer, optimise, assign a force field
   (see [Force fields](#force-fields)), pack N chains into a cubic,
   orthorhombic or triclinic box with packmol, export. Every long step can be
