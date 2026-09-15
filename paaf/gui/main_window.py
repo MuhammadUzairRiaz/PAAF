@@ -945,7 +945,9 @@ class MainWindow(QMainWindow):
             "Log initial + final energy (ΔE shown after each optimization)")
         self.opt_report_energy.setChecked(True)
         self.opt_report_energy.setToolTip(wrap_tooltip("When on, the console shows lines like:\n"
-            "  Optimization done (MMFF94): initial E = 234.7 → final E = 128.4 (ΔE = -106.3)"
+            "  Optimization done (MMFF94): initial E = 234.7 → final E = 128.4 (ΔE = -106.3)\n"
+            "Every run also writes the full console to <output>/<project>/paaf_run.log "
+            "and the energies of each optimisation to energies.txt in the same folder."
         ))
         ef.addRow(self.opt_report_energy)
 

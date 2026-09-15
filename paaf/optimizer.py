@@ -158,6 +158,12 @@ def optimize(
         for a, ob_atom in zip(mol.atoms, obmol.atoms):
             a.xyz[:] = ob_atom.coords
         e_final = force_field.Energy()
+        try:
+            from .run_log import record_energy
+            record_energy(mol.name or "molecule", used_ff, e_initial, e_final,
+                          len(mol.atoms))
+        except Exception:
+            pass
         if report_energy:
             log.info(
                 "Optimization done (%s):  initial E = %.4f  →  final E = %.4f  "

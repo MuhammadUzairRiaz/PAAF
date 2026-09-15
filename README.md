@@ -263,6 +263,11 @@ PYTHONPATH=. python -m pytest tests/ -q
 About 1,900 tests; those needing RDKit/PyQt5 skip automatically when missing.
 Run GUI tests headless with `QT_QPA_PLATFORM=offscreen`.
 
+Every pipeline run also leaves `paaf_run.log` (the full console output of
+that run) and, when the optimiser ran, `energies.txt` (initial / final
+OpenBabel energy of each minimisation) in `<output>/<project>/`, next to
+`dl_field.log` / `moltemplate.log`.
+
 ## 5. Troubleshooting
 
 | Symptom | Cause / fix |

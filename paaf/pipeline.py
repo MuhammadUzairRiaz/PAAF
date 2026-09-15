@@ -106,10 +106,19 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None,
     def _stage(k: int, label: str) -> None:
         _p(f"[stage {k}/{_N_STAGES}] {label}")
 
-    try:
-        return _run_pipeline_body(cfg, _p, _stage, _check, cancel)
-    except PackCancelled as exc:
-        raise PipelineCancelled(str(exc)) from exc
+    from .run_log import run_log
+    out_dir = Path(cfg.output_dir) / cfg.project_name
+    with run_log(out_dir) as rl:
+        try:
+            result = _run_pipeline_body(cfg, _p, _stage, _check, cancel)
+        except PackCancelled as exc:
+            raise PipelineCancelled(str(exc)) from exc
+    result["log_file"] = rl.get("log_file")
+    result["energy_file"] = rl.get("energy_file")
+    if rl.get("energy_file"):
+        _p(f"Optimisation energies: {rl['energy_file']}")
+    _p(f"Run log: {rl['log_file']}")
+    return result
 
 
 def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
