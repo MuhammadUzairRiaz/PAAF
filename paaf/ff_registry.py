@@ -207,20 +207,20 @@ REGISTRY: Dict[str, ForceField] = {
     # ---- from DL_FIELD ----
     "pcff": ForceField(
         key="pcff",
-        display_name="PCFF (converted from DL_FIELD)",
+        display_name="PCFF (DL_FIELD)",
         kind="dlfield",
         lt_include=None,   # generated on the fly
         inherit="PCFF",
         atom_typer="dlfield_sf",
         dlfield_par="PCFF.par",
         dlfield_sf="PCFF.sf",
-        notes="Class-II polymer FF (quartic bonds/angles + cross terms). "
-              "Converted by paaf.dlfield_converter into a Moltemplate .lt.",
+        notes="Class-II polymer FF (quartic bonds/angles + cross terms); "
+              "typed and parametrised by dl_field.",
         tags=["all-atom", "polymer", "class-II"],
     ),
     "compass": ForceField(
         key="compass",
-        display_name="COMPASS (converted from DL_FIELD)",
+        display_name="COMPASS (DL_FIELD)",
         kind="dlfield",
         inherit="COMPASS",
         atom_typer="dlfield_sf",
@@ -231,7 +231,7 @@ REGISTRY: Dict[str, ForceField] = {
     ),
     "cvff": ForceField(
         key="cvff",
-        display_name="CVFF (converted from DL_FIELD)",
+        display_name="CVFF (DL_FIELD)",
         kind="dlfield",
         inherit="CVFF",
         atom_typer="dlfield_sf",

@@ -53,8 +53,8 @@ monomer SMILES to a simulation-ready LAMMPS or GROMACS system, end to end:
 
 | Route | Force fields |
 |---|---|
-| Moltemplate libraries (bundled, typed automatically) | OPLS-AA 2024 and 2008, L-OPLS-AA 2024 and 2008, OPLS-UA 2024, TraPPE-UA, GAFF / GAFF2, DREIDING, COMPASS (public parameters), PCFF / COMPASS / CVFF (converted from DL_FIELD), SDK, MARTINI / Dry MARTINI |
-| DL_FIELD (needs a DL_FIELD install) | OPLS 2005 / 2020 / AA-M / UA, CHARMM (19, 22, 36 families, CGenFF), AMBER / GAFF, GROMOS 54A7, TraPPE-EH / UA, DREIDING, ionic liquids, deep-eutectic solvents, inorganic sets (oxides, halides, clays, glasses, zeolites) |
+| Moltemplate libraries (bundled, typed automatically) | OPLS-AA 2024 and 2008, L-OPLS-AA 2024 and 2008, OPLS-UA 2024, TraPPE-UA, GAFF / GAFF2, DREIDING, COMPASS (public parameters), SDK, MARTINI / Dry MARTINI |
+| DL_FIELD (needs a DL_FIELD install) | PCFF, COMPASS, CVFF, OPLS 2005 / 2020 / AA-M / UA, CHARMM (19, 22, 36 families, CGenFF), AMBER / GAFF, GROMOS 54A7, TraPPE-EH / UA, DREIDING, ionic liquids, deep-eutectic solvents, inorganic sets (oxides, halides, clays, glasses, zeolites) |
 
 United-atom beads can be mixed into an all-atom chain (see below); each
 molecule is neutralised after the two libraries' charges are combined.
