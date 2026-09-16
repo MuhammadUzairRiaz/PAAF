@@ -191,6 +191,7 @@ class _BuildWorker(QObject):
                     run_typing=o["run_typing"], push_off=o["push_off"],
                     relax=bool(o.get("relax")), relax_settings=rs,
                     output_formats=o.get("output_formats", "lammps"),
+                    lammps_styles=o.get("lammps_styles", "hybrid"),
                     progress=_emit_checked, cancel=self._cancel)
             self.finished.emit((result, export))
         except PackCancelled:
@@ -538,6 +539,10 @@ class AmorphousTab(QWidget):
         self._export = None
         self._settings_provider = None
         self._updating = False        # re-entry guard for linked weight boxes
+        # Next stays off until the user has pressed Solve composition and the
+        # composition is still valid. Auto re-solves on edits keep it on.
+        self._user_solved = False
+        self._busy = False
         self._thread: Optional[QThread] = None
         self._worker: Optional[_BuildWorker] = None
         self._build()
@@ -561,6 +566,15 @@ class AmorphousTab(QWidget):
         fit_tabs_to_current(self.steps)
         page.addWidget(self.steps, 1)
         page.addWidget(self._action_bar())
+
+        # Output choices live on the Export step but depend on the Force
+        # field step, so wire them once both exist.
+        self.run_typing.toggled.connect(lambda _on: self._on_format_inputs())
+        self.ff_combo.currentIndexChanged.connect(
+            lambda _i: self._on_format_inputs())
+        self._on_format_inputs()
+        self.steps.currentChanged.connect(self._sync_nav)
+        self._sync_nav()
 
     # ------------------------------------------------ step 1: composition
     def _composition_page(self) -> QWidget:
@@ -869,22 +883,9 @@ class AmorphousTab(QWidget):
 
         self.run_typing = QCheckBox("Apply the force field and write MD files")
         self.run_typing.setChecked(True)
+        self.run_typing.setToolTip(wrap_tooltip(
+            "Which MD files (LAMMPS / GROMACS) are chosen on the Export step."))
         aform.addRow("", self.run_typing)
-
-        self.output_format = QComboBox()
-        self.output_format.addItem("LAMMPS (cell.data + cell.in)", "lammps")
-        self.output_format.addItem("GROMACS (cell.gro + cell.top)", "gromacs")
-        self.output_format.addItem("Both", "both")
-        self.output_format.setFixedHeight(T.H_CONTROL)
-        self.output_format.setToolTip(wrap_tooltip(
-            "Which MD engine the typed cell is written for. The typing is "
-            "identical either way — DL_FIELD assigns the same force field to "
-            "the same cell — only the file format differs. GROMACS output "
-            "is a .gro/.top pair (plus .itp includes); 'Both' asks DL_FIELD "
-            "twice, once per format."))
-        self.output_format.currentIndexChanged.connect(
-            lambda _i: self._refresh_files())
-        aform.addRow("Write files for", self.output_format)
         card2.body.addLayout(aform)
         card2.body.addStretch(1)
         row.addWidget(card2)
@@ -1166,7 +1167,49 @@ class AmorphousTab(QWidget):
         self.cell_name.setFixedHeight(T.H_CONTROL)
         self.cell_name.textChanged.connect(lambda _t: self._refresh_files())
         form.addRow("Cell name", self.cell_name)
+
+        self.output_format = QComboBox()
+        self.output_format.addItem("LAMMPS (cell.data + cell.in)", "lammps")
+        self.output_format.addItem(
+            "GROMACS (cell.gro + cell.top + .itp)", "gromacs")
+        self.output_format.addItem("Both LAMMPS and GROMACS", "both")
+        self.output_format.setFixedHeight(T.H_CONTROL)
+        self.output_format.setToolTip(wrap_tooltip(
+            "Which MD engine the typed cell is written for. The typing is "
+            "identical either way — DL_FIELD assigns the same force field to "
+            "the same cell — only the file format differs. GROMACS output "
+            "is cell.gro + cell.top plus the .itp file the topology "
+            "includes; 'Both' asks DL_FIELD twice, once per format. GROMACS "
+            "needs a DL_FIELD force field."))
+        self.output_format.currentIndexChanged.connect(
+            lambda _i: self._on_format_inputs())
+        form.addRow("Write files for", self.output_format)
+
+        self.lammps_styles = QComboBox()
+        self.lammps_styles.addItem(
+            "Hybrid — as written by DL_FIELD (bond_style hybrid harmonic)",
+            "hybrid")
+        self.lammps_styles.addItem(
+            "Non-hybrid — plain styles (bond_style harmonic), in non_hybrid/",
+            "non_hybrid")
+        self.lammps_styles.addItem(
+            "Both — keep the DL_FIELD files and also write non_hybrid/",
+            "both")
+        self.lammps_styles.setFixedHeight(T.H_CONTROL)
+        self.lammps_styles.setToolTip(wrap_tooltip(
+            "Applies to LAMMPS output from the DL_FIELD route. Hybrid: every "
+            "*_style is 'hybrid <one sub-style>' and each coefficient line "
+            "repeats the sub-style name — valid, but awkward to merge or "
+            "edit. Non-hybrid: the same numbers with plain styles, written "
+            "as non_hybrid/cell.in + non_hybrid/cell.data. The hybrid "
+            "originals are always kept."))
+        self.lammps_styles.currentIndexChanged.connect(
+            lambda _i: self._on_format_inputs())
+        form.addRow("LAMMPS styles", self.lammps_styles)
         card.body.addLayout(form)
+        self.format_note = caption("")
+        self.format_note.setWordWrap(True)
+        card.body.addWidget(self.format_note)
         self.out_hint = caption("")
         self.out_hint.setWordWrap(True)
         card.body.addWidget(self.out_hint)
@@ -1178,6 +1221,8 @@ class AmorphousTab(QWidget):
         self.files.verticalHeader().setVisible(False)
         self.files.verticalHeader().setDefaultSectionSize(T.H_TABLE_ROW)
         self.files.horizontalHeader().setFixedHeight(T.H_TABLE_HEADER)
+        self.files.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeToContents)
         self.files.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.files.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.files.setMinimumHeight(150)
@@ -1239,9 +1284,17 @@ class AmorphousTab(QWidget):
         self.b_cancel.hide()
         h.addWidget(self.b_cancel)
 
+        self.b_back = button("← Back")
+        self.b_back.clicked.connect(lambda: self._go_step(-1))
+        h.addWidget(self.b_back)
+
         self.b_solve = button("Solve composition")
         self.b_solve.clicked.connect(lambda: self._solve(quiet=False))
         h.addWidget(self.b_solve)
+
+        self.b_next = button("Next →", "primary")
+        self.b_next.clicked.connect(lambda: self._go_step(+1))
+        h.addWidget(self.b_next)
 
         self.b_build = button("Build cell", "primary")
         self.b_build.clicked.connect(self._build_cell)
@@ -1379,9 +1432,7 @@ class AmorphousTab(QWidget):
         self.tacticity.setEnabled(on)
         self.push_off.setEnabled(on)
         self.run_typing.setEnabled(on)
-        if hasattr(self, "output_format"):
-            self.output_format.setEnabled(on)
-        self._refresh_files()
+        self._on_format_inputs()
 
     def _on_ff_changed(self, _i: int) -> None:
         from ..ff_registry import REGISTRY
@@ -1468,15 +1519,21 @@ class AmorphousTab(QWidget):
             else:
                 r.set_outcome(got[0], got[1])
         self.b_build.setEnabled(True)
+        if not quiet:
+            self._user_solved = True
         self._set_badge(self.solve_badge, f"{comp.total_chains} chains", "ok")
         self.blocker.setText(
-            f"{comp.total_beads:,} beads in a {comp.box_edge_a:.1f} Å box.")
+            f"{comp.total_beads:,} beads in a {comp.box_edge_a:.1f} Å box."
+            + ("" if self._user_solved
+               else "  Press Solve composition to continue."))
         if not quiet:
             self._rlog(comp.summary())
         self._refresh_files()
+        self._sync_nav()
 
     def _solve_error(self, headline: str, detail: str) -> None:
         self._composition = None
+        self._user_solved = False
         self.b_build.setEnabled(False)
         self.preview.setRowCount(0)
         for w in (self.stat_box, self.stat_beads, self.stat_mass):
@@ -1488,6 +1545,7 @@ class AmorphousTab(QWidget):
             f"color: {T.DANGER}; font-size: {T.FS_CAPTION}px;"
             f" background: transparent; border: none;")
         self._rlog(f"{headline} {detail}")
+        self._sync_nav()
 
     def _fill_preview(self, comp) -> None:
         self.preview.setRowCount(len(comp.components))
@@ -1565,6 +1623,11 @@ class AmorphousTab(QWidget):
     def _on_build_fraction(self, *_a) -> None:
         """A change of build density invalidates the solved composition."""
         self._composition = None
+        if self._user_solved:
+            self._user_solved = False
+            self.blocker.setText(
+                "Build density changed — press Solve composition again.")
+        self._sync_nav()
 
     def _build_cell(self) -> None:
         if self._composition is None:
@@ -1614,6 +1677,7 @@ class AmorphousTab(QWidget):
             "tacticity": self.tacticity.currentText(),
             "run_typing": self.run_typing.isChecked(),
             "output_formats": self.output_format.currentData() or "lammps",
+            "lammps_styles": self.lammps_styles.currentData() or "hybrid",
             "push_off": self.push_off.isChecked(),
             "relax": self.do_relax.isChecked(),
             "push_steps": int(self.push_steps.value()),
@@ -1683,8 +1747,10 @@ class AmorphousTab(QWidget):
                        "(external programs are killed immediately)")
 
     def _set_busy(self, busy: bool) -> None:
+        self._busy = busy
         self.b_build.setEnabled(not busy)
         self.b_solve.setEnabled(not busy)
+        self._sync_nav()
         self.b_cancel.setVisible(busy)
         self.bar_progress.setVisible(busy)
         self.stage_lb.setVisible(busy)
@@ -1779,6 +1845,80 @@ class AmorphousTab(QWidget):
         box.setStandardButtons(QMessageBox.Ok)
         box.exec_()
 
+    # ==================================================== step navigation
+    def _go_step(self, delta: int) -> None:
+        i = self.steps.currentIndex() + delta
+        if 0 <= i < self.steps.count() and self.steps.isTabEnabled(i):
+            self.steps.setCurrentIndex(i)
+
+    def _sync_nav(self, *_a) -> None:
+        """Back / Solve / Next / Build for the step on screen.
+
+        Steps 2-4 open only after Solve composition was pressed and the
+        composition is valid; Build cell appears on the last step only.
+        """
+        if not hasattr(self, "b_next"):
+            return                        # still being constructed
+        ready = self._user_solved and self._composition is not None
+        last = self.steps.count() - 1
+        for k in range(1, self.steps.count()):
+            self.steps.setTabEnabled(k, ready)
+        i = self.steps.currentIndex()
+        self.b_back.setVisible(i > 0)
+        self.b_back.setEnabled(not self._busy)
+        self.b_solve.setVisible(i == 0)
+        self.b_next.setVisible(i < last)
+        self.b_next.setEnabled(ready and not self._busy)
+        self.b_next.setToolTip(wrap_tooltip(
+            "" if ready else "Press Solve composition first."))
+        self.b_build.setVisible(i == last)
+
+    # ==================================================== output formats
+    def _dlfield_route(self) -> bool:
+        """True when the chosen force field is typed by DL_FIELD (as export does)."""
+        try:
+            from ..ff_registry import REGISTRY
+            ff = REGISTRY.get(self.ff_combo.currentData() or "")
+            return ff is not None and (ff.kind == "dlfield"
+                                       or ff.atom_typer == "dlfield_sf")
+        except Exception:
+            return False
+
+    def _on_format_inputs(self) -> None:
+        """Enable the Export step's format choices the force field allows."""
+        if not hasattr(self, "lammps_styles"):
+            return                        # still being constructed
+        from ..ff_registry import REGISTRY
+        typed = self.atomistic.isChecked() and self.run_typing.isChecked()
+        fmt = self.output_format.currentData() or "lammps"
+        dl = self._dlfield_route()
+        self.output_format.setEnabled(typed)
+        self.lammps_styles.setEnabled(typed and dl and fmt in ("lammps", "both"))
+        ff = REGISTRY.get(self.ff_combo.currentData() or "")
+        ff_name = ff.display_name if ff is not None else "This force field"
+        if not typed:
+            note = ("Force-field typing is off (Force field step), so no "
+                    "LAMMPS or GROMACS files will be written.")
+        elif not dl:
+            note = (f"{ff_name} is typed by Moltemplate, which writes LAMMPS "
+                    f"input only, with its own styles.")
+            if fmt in ("gromacs", "both"):
+                note += (" GROMACS .gro/.top/.itp need a DL_FIELD force "
+                         "field; only LAMMPS files will be written.")
+        else:
+            parts = []
+            if fmt in ("lammps", "both"):
+                parts.append("LAMMPS: cell.data + cell.in"
+                             + (" and plain-style copies in non_hybrid/"
+                                if (self.lammps_styles.currentData()
+                                    in ("non_hybrid", "both")) else ""))
+            if fmt in ("gromacs", "both"):
+                parts.append("GROMACS: cell.gro + cell.top + the .itp it "
+                             "includes")
+            note = "; ".join(parts) + "."
+        self.format_note.setText(note)
+        self._refresh_files()
+
     # ==================================================== misc
     def _refresh_files(self) -> None:
         # Called from the force-field page's initial refresh, which runs
@@ -1800,6 +1940,9 @@ class AmorphousTab(QWidget):
             if self.run_typing.isChecked():
                 fmt = (self.output_format.currentData() or "lammps"
                        if hasattr(self, "output_format") else "lammps")
+                dl = self._dlfield_route()
+                if not dl:
+                    fmt = "lammps"         # Moltemplate writes LAMMPS only
                 if fmt in ("lammps", "both"):
                     rows.append((f"{name}/cell.data",
                                  "typed LAMMPS data — written only if typing "
@@ -1808,13 +1951,26 @@ class AmorphousTab(QWidget):
                                  "the LAMMPS input beside it: styles and pair "
                                  "coefficients. cell.data alone cannot be "
                                  "run"))
+                    styles = (self.lammps_styles.currentData() or "hybrid"
+                              if hasattr(self, "lammps_styles") else "hybrid")
+                    if dl and styles in ("non_hybrid", "both"):
+                        rows.append((f"{name}/non_hybrid/cell.in",
+                                     "the same input with plain styles "
+                                     "(bond_style harmonic, no 'hybrid')"))
+                        rows.append((f"{name}/non_hybrid/cell.data",
+                                     "the data file with sub-style names "
+                                     "removed from the coefficient lines"))
                 if fmt in ("gromacs", "both"):
                     rows.append((f"{name}/cell.gro",
                                  "typed GROMACS coordinates — same typing, "
                                  "GROMACS format"))
                     rows.append((f"{name}/cell.top",
-                                 "the topology beside it (+ .itp includes); "
-                                 "run with gmx grompp/mdrun"))
+                                 "the topology; #includes the .itp below. "
+                                 "Run with gmx grompp/mdrun"))
+                    rows.append((f"{name}/*.itp",
+                                 "molecule types and parameters DL_FIELD "
+                                 "wrote (e.g. gromacs1.itp) — keep beside "
+                                 "cell.top"))
         self.files.setRowCount(len(rows))
         for i, (f, what) in enumerate(rows):
             self.files.setItem(i, 0, QTableWidgetItem(f))

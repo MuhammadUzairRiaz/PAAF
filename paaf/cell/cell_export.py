@@ -68,6 +68,10 @@ class CellExport:
     #: same box, different file format.
     typed_gro: Optional[Path] = None
     typed_top: Optional[Path] = None
+    #: The ``.itp`` files cell.top ``#include``s, copied beside it.
+    typed_itps: List[Path] = field(default_factory=list)
+    #: Plain-style copies of cell.in + cell.data in ``non_hybrid/``.
+    nonhybrid_files: List[Path] = field(default_factory=list)
     lt_files: List[Path] = field(default_factory=list)
     n_beads: int = 0
     n_atoms: int = 0
@@ -293,6 +297,31 @@ def _dlfield_root(dl_field_dir: Optional[Path]) -> Optional[Path]:
     # Neither exists; hand back the parent, which is where the executable
     # belongs, so the error names the sensible location.
     return d.parent if d.name == "lib" else d
+
+
+def _write_nonhybrid(exp: "CellExport", folder: Path,
+                     emit: Callable[[str], None]) -> None:
+    """Write plain-style copies of cell.in + cell.data into ``non_hybrid/``."""
+    if exp.typed_input is None or exp.typed_data is None:
+        exp.messages.append(
+            "Non-hybrid LAMMPS files were not written: there is no cell.in "
+            "to convert.")
+        return
+    try:
+        from ..lammps_hybrid import convert_to_nonhybrid, is_hybrid_input
+        if not is_hybrid_input(exp.typed_input):
+            exp.messages.append(
+                "cell.in already uses plain (non-hybrid) styles, so no "
+                "non_hybrid/ copy was needed.")
+            return
+        new_in, new_data = convert_to_nonhybrid(
+            exp.typed_input, [exp.typed_data], folder / "non_hybrid",
+            read_data=exp.typed_data.name)
+        exp.nonhybrid_files = [new_in] + list(new_data)
+        emit("  wrote non_hybrid/cell.in + non_hybrid/cell.data "
+             "(plain LAMMPS styles)")
+    except Exception as exc:
+        exp.messages.append(f"Non-hybrid LAMMPS files not written — {exc}")
 
 
 def _run_dlfield(structure: Path, work_dir: Path, ff_key: str,
@@ -564,6 +593,7 @@ def export_cell(
     relax: bool = False,
     relax_settings: Optional[object] = None,
     output_formats: str = "lammps",   # "lammps" | "gromacs" | "both"
+    lammps_styles: str = "hybrid",    # "hybrid" | "non_hybrid" | "both"
     progress: Optional[Callable[[str], None]] = None,
     cancel=None,
 ) -> CellExport:
@@ -768,6 +798,9 @@ def export_cell(
                          f"(styles + pair coefficients)")
                     for extra in sorted(data.parent.glob("*.in.*")):
                         shutil.copy2(extra, folder / extra.name)
+                    if str(lammps_styles or "hybrid").lower() in (
+                            "non_hybrid", "nonhybrid", "both"):
+                        _write_nonhybrid(exp, folder, emit)
                 else:
                     exp.messages.append(
                         "DL_FIELD wrote no lammps.in, so cell.data has no "
@@ -813,9 +846,11 @@ def export_cell(
                 # must travel with it or grompp dies on a missing include.
                 for itp in sorted(gro.parent.glob("*.itp")):
                     shutil.copy2(itp, folder / itp.name)
+                    exp.typed_itps.append(folder / itp.name)
                 exp.typed = True
                 emit(f"  wrote cell.gro"
-                     + (" + cell.top (with itp includes)" if tops else "")
+                     + (" + cell.top" if tops else "")
+                     + "".join(f" + {p.name}" for p in exp.typed_itps)
                      + " for GROMACS")
                 if not tops:
                     exp.messages.append(
@@ -823,6 +858,18 @@ def export_cell(
                         "coordinates only and cannot be simulated alone.")
     else:
         exp.route = f"Moltemplate ({ff.display_name})"
+        fmt = str(output_formats or "lammps").lower()
+        if fmt in ("gromacs", "both"):
+            exp.messages.append(
+                f"GROMACS files (.gro/.top/.itp) are written by DL_FIELD, but "
+                f"{ff.display_name} is typed by Moltemplate, which writes "
+                f"LAMMPS input only. Only LAMMPS files were written; choose a "
+                f"DL_FIELD force field for GROMACS output.")
+        if str(lammps_styles or "hybrid").lower() in (
+                "non_hybrid", "nonhybrid", "both"):
+            exp.messages.append(
+                "The hybrid / non-hybrid choice applies to DL_FIELD output. "
+                "Moltemplate's LAMMPS input was left as it wrote it.")
         try:
             from .. import ff_assigner
             emit("  assigning atom types …")
