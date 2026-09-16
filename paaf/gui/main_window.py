@@ -2110,6 +2110,12 @@ class MainWindow(QMainWindow):
             if k == "config":
                 continue
             self._append_log(f"  {k}: {v}")
+        # The GROMACS route has its own net charge, read from the .top grompp
+        # will get. Name the engine so the two numbers above are not read as
+        # one; the LAMMPS figure keeps the plain `net_charge` line it had.
+        _q_gmx = result.get("net_charge_gromacs")
+        if _q_gmx is not None:
+            self._append_log(f"  net charge (GROMACS): {_q_gmx:+.4f} e")
         self.statusBar().showMessage("Finished", 5000)
 
     @pyqtSlot(str)

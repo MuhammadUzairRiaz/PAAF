@@ -14,6 +14,13 @@ monomer SMILES to a simulation-ready LAMMPS or GROMACS system, end to end:
   dl_field route you can choose **hybrid** (as dl_field writes it) or
   **non-hybrid** LAMMPS styles (plain `bond_style harmonic`, written to
   `non_hybrid/`).
+- **Charge summary:** every run ends by reading back the files you will
+  actually run and reporting `Charges: N atoms in <file>, net ±q e` — the
+  LAMMPS data file (`packed_box.data`, `lammps.data`, …) and the GROMACS
+  topology (`packed_box.top`, `gromacs.top`, `system.top`, following its
+  `#include`d `.itp` files). A net charge above 0.05 e, or a system where
+  every charge is zero, is called out: both run perfectly happily and give
+  silently wrong electrostatics.
 - **Amorphous cell:** grows chains bond-by-bond into a periodic box
   (Theodorou–Suter growth with RIS torsion statistics), back-maps to all
   atoms, resolves overlaps with a soft push-off, and types the finished

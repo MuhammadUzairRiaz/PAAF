@@ -407,6 +407,112 @@ def data_file_charges(data_path: Path, charges_file: Optional[Path] = None
     return (n, total, biggest) if n else None
 
 
+def _read_top_sections(top_path: Path, charges: Dict[str, List[float]],
+                       molecules: List[tuple], seen: set) -> None:
+    """Fill ``charges`` / ``molecules`` from ``top_path`` and its includes.
+
+    ``charges`` maps a moleculetype name to one charge per atom line;
+    ``molecules`` is the ``[ molecules ]`` list of ``(name, count)`` pairs.
+    Both are accumulated in place so an ``#include``d ``.itp`` contributes
+    to the same picture as the ``.top`` that pulled it in.
+    """
+    top_path = Path(top_path)
+    try:
+        key = top_path.resolve()
+    except OSError:
+        key = top_path
+    if key in seen:
+        return                              # #include cycle
+    seen.add(key)
+    try:
+        lines = top_path.read_text(errors="replace").splitlines()
+    except OSError:
+        return
+
+    section = ""
+    current = ""          # moleculetype the [ atoms ] lines belong to
+    for raw in lines:
+        line = raw.split(";", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            # Only #include matters here; #define / #ifdef are ignored.
+            if line.startswith("#include"):
+                target = line[len("#include"):].strip().strip('"').strip("<>")
+                child = top_path.parent / target
+                if child.exists():
+                    _read_top_sections(child, charges, molecules, seen)
+                # A missing include is normally the force field's own
+                # (oplsaa.ff/forcefield.itp), which lives in the GROMACS
+                # share dir and carries no moleculetype of ours. Skip it.
+                section = ""
+                current = ""
+            continue
+        if line.startswith("["):
+            section = line.strip("[]").strip().lower()
+            continue
+        if section == "moleculetype":
+            current = line.split()[0]
+            charges.setdefault(current, [])
+        elif section == "atoms":
+            parts = line.split()
+            if len(parts) < 7:
+                continue                    # not "nr type resnr res atom cgnr q"
+            try:
+                q = float(parts[6])
+            except ValueError:
+                continue
+            charges.setdefault(current, []).append(q)
+        elif section == "molecules":
+            parts = line.split()
+            if len(parts) < 2:
+                continue
+            try:
+                count = int(float(parts[1]))
+            except ValueError:
+                continue
+            molecules.append((parts[0], count))
+
+
+def top_file_charges(top_path: Path) -> Optional[Tuple[int, float, float]]:
+    """``(n_atoms, total_charge, max_abs_charge)`` from a GROMACS ``.top``.
+
+    The GROMACS counterpart of :func:`data_file_charges`. Charges live once
+    per moleculetype in its ``[ atoms ]`` section (column 7 of
+    ``nr type resnr residue atom cgnr charge mass``) and the system is the
+    ``[ molecules ]`` list multiplying each of them, so the totals here are
+    per-system, not per-molecule — the same number grompp will report.
+
+    ``#include``d ``.itp`` files are followed when they exist relative to the
+    ``.top``, which is how a packed box reaches the moleculetype that
+    ``gromacs1.itp`` defines. Includes that do not resolve are the force
+    field's own (``oplsaa.ff/forcefield.itp`` and friends); they define no
+    moleculetype of ours and are skipped without comment.
+
+    Returns ``None`` when nothing in the file (or its includes) had an
+    ``[ atoms ]`` section to read.
+    """
+    charges: Dict[str, List[float]] = {}
+    molecules: List[tuple] = []
+    _read_top_sections(Path(top_path), charges, molecules, set())
+    if not any(charges.values()):
+        return None
+    # No [ molecules ] section: describe what was defined, once each.
+    if not molecules:
+        molecules = [(name, 1) for name in charges]
+    total = 0.0
+    biggest = 0.0
+    n = 0
+    for name, count in molecules:
+        qs = charges.get(name)
+        if not qs:
+            continue                        # a moleculetype we never saw
+        total += sum(qs) * count
+        biggest = max([biggest] + [abs(q) for q in qs])
+        n += len(qs) * count
+    return (n, total, biggest) if n else None
+
+
 def _first_name(work_dir: Path, pattern: str) -> str:
     """Name of the first file matching ``pattern`` in ``work_dir``, or ""."""
     hits = sorted(Path(work_dir).glob(pattern))

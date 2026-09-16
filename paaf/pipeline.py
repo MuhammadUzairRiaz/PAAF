@@ -976,10 +976,44 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                f"will be missing if this force field is meant to be charged.")
         break
 
+    # ...and the same check on the GROMACS topology, which grompp reads.
+    # A .top carries its charges per moleculetype and multiplies them by the
+    # [ molecules ] counts, so a rounding error worth 0.001 e on one chain
+    # becomes 0.2 e on a 200-chain box — exactly the case worth catching
+    # before grompp does.
+    net_charge_gromacs = None
+    if cfg.engine in ("gromacs", "both"):
+        for _tcand in (out_dir / "packed_box.top", out_dir / "gromacs.top",
+                       out_dir / "gromacs1.top", out_dir / "system.top"):
+            if not _tcand.exists():
+                continue
+            try:
+                from .cell.cell_export import top_file_charges
+                _tq = top_file_charges(_tcand)
+            except Exception as exc:
+                _p(f"WARNING: could not read charges from {_tcand.name} ({exc})")
+                break
+            if _tq is None:
+                break
+            _n_at, net_charge_gromacs, _qmax = _tq
+            _p(f"Charges: {_n_at} atoms in {_tcand.name}, "
+               f"net {net_charge_gromacs:+.4f} e")
+            if abs(net_charge_gromacs) > 0.05:
+                _p(f"WARNING: {_tcand.name} carries a net charge of "
+                   f"{net_charge_gromacs:+.3f} e; grompp will report a "
+                   f"non-zero total charge. Check manual type overrides / "
+                   f"united-atom beads.")
+            elif _qmax == 0.0:
+                _p(f"WARNING: every charge in {_tcand.name} is zero — "
+                   f"electrostatics will be missing if this force field is "
+                   f"meant to be charged.")
+            break
+
     return {
         "output_dir": str(out_dir),
         "engine": cfg.engine,
         "net_charge": net_charge,
+        "net_charge_gromacs": net_charge_gromacs,
         "runner": ("dl_field" if ff.kind == "dlfield" else "moltemplate"),
         "monomer_files": [str(out_dir / f"{m.name}_opt.xyz") for m in monomers],
         "chain_lt": str(chain_lt),
