@@ -72,13 +72,16 @@ All three are spin boxes — type into them or use the arrows.
 
 ### Growth
 
-Leave these alone unless a build fails.
+Leave these alone. A build always completes — see *How growth handles a
+crowded box* below.
 
 - **Overlap tolerance** (default 1.70 Å) — the hard minimum approach between
   non-bonded beads. It is *not* the physical contact distance; the soft bias
-  already handles that. Raising it stops dense cells building at all.
-- **Look-ahead depth** (default 0) — leave at 0. It defeats attrition but
-  biases chain dimensions, and the tool warns you when it is on.
+  already handles that. Raising it past what the density allows leaves close
+  contacts, which the result counts and warns about.
+- **Look-ahead depth** (default 0) — leave at 0. It biases chain dimensions,
+  and backtracking already handles dead ends. The tool warns you when it is
+  on.
 - **Random seed** — same seed, same cell, exactly.
 - **Reject bonds that thread through a ring** — leave ticked.
 
@@ -234,15 +237,35 @@ python -m pytest tests/test_ris.py tests/test_grow.py -q -s
 
 ---
 
-## If a build fails
+## How growth handles a crowded box
 
-The error names what to change, in order of what usually helps. The most
-common causes:
+Chains go in one at a time, so the last ones grow into a box that is nearly
+full, and a step can find every torsion state blocked. Growth does not give
+up on that; it works through three layers and only reaches the next when the
+one before runs out:
+
+1. **Backtrack.** Retract the last two beads and regrow them. If the chain
+   gets stuck again at the same place, retract twice as far (up to 64).
+2. **Fresh start.** Up to four new starting points for that chain, each the
+   roomiest of several random points.
+3. **Force, then relieve.** Take the least-crowded state, and after all chains
+   are in, push the close contacts apart with bond lengths and angles held,
+   then snap those back to their exact values.
+
+The log line `dead ends : N backtracked, M forced` says which layers were
+needed, and `closest pair` says how clean the cell is. Up to melt densities
+(and well past them — PE builds clean at 1.3 g/cm³) nothing is forced.
+
+## If the result warns about close contacts
+
+The badge reads **built · N close contact(s)** only when the beads physically
+cannot fit at the requested density and overlap tolerance — for example a
+box smaller than the chains' own excluded volume. The cell is still written
+so it can be relaxed, but for a clean construction:
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "Could not grow chain N" | Box too dense for the chain length | Lower the density, shorten the chains, or raise look-ahead to 1–2 (and then don't quote C_n) |
-| Overlap tolerance blamed | It is above ~1.75 Å | Put it back to 1.70 |
+| Close contacts reported | Density or tolerance impossible to honour | Lower "Build at" or the density; put the tolerance back to 1.70 |
 | `beads only` on a row | Backbone ring | Coarse-grained export only for that polymer |
 | Bond lengths look absurd | Cell smaller than twice the repeat unit | Raise Cell size or DP |
 

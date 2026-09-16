@@ -690,8 +690,9 @@ class AmorphousTab(QWidget):
         self.tolerance.setSuffix("  Å")
         self.tolerance.setFixedHeight(T.H_CONTROL)
         self.tolerance.setToolTip(wrap_tooltip("Hard minimum approach between non-bonded beads. Not the physical "
-            "contact distance — the soft bias already handles that. Raising "
-            "it makes dense cells fail to build."))
+            "contact distance — the soft bias already handles that. A cell "
+            "always builds; a tolerance the density cannot honour leaves "
+            "counted close contacts, reported with the result."))
         gform.addRow("Overlap tolerance", self.tolerance)
 
         self.scan_depth = QSpinBox()
@@ -1355,7 +1356,7 @@ class AmorphousTab(QWidget):
     def _on_scan_changed(self, v: int) -> None:
         if v > 0:
             self.scan_warn.setText(
-                "Look-ahead defeats attrition and lets denser cells be built, "
+                "Look-ahead steers growth away from dead ends, "
                 "but choosing a torsion by its look-ahead weight is a biased "
                 "estimator (Rosenbluth). It over-samples extended chains — "
                 "measured C_n rose to ~9 against ~6.3 unbiased. Do not quote "
@@ -1365,8 +1366,9 @@ class AmorphousTab(QWidget):
                 f" background: transparent; border: none;")
         else:
             self.scan_warn.setText(
-                "Off — chain dimensions are unbiased. Raise it only if the "
-                "cell will not build at all.")
+                "Off — chain dimensions are unbiased. Dead ends are handled "
+                "by backtracking, so there is no need to raise it to get a "
+                "cell built.")
             self.scan_warn.setStyleSheet(
                 f"color: {T.TEXT_MUTED}; font-size: {T.FS_CAPTION}px;"
                 f" background: transparent; border: none;")
@@ -1744,6 +1746,12 @@ class AmorphousTab(QWidget):
         else:
             self._set_stat(self.res_atoms, f"{len(result.molecule.atoms):,} beads")
             self._set_badge(self.result_badge, "built", "ok")
+        if getattr(result, "n_contacts", 0):
+            # Growth never fails, but a density the beads cannot fit at is
+            # not a clean cell and must not look like one.
+            self._set_badge(
+                self.result_badge,
+                f"built · {result.n_contacts} close contact(s)", "warn")
         self.res_notes.setText("  ".join(notes))
         self._rlog(result.summary())
         if getattr(export, "relax", None) is not None:

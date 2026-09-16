@@ -737,6 +737,42 @@ def find_rings(molecule: Molecule, max_size: int = 8) -> List[List[int]]:
     return rings
 
 
+def _bonds_through_disc(xyz: np.ndarray, bi: np.ndarray, bj: np.ndarray,
+                        dims: np.ndarray, centre: np.ndarray,
+                        normal: np.ndarray, radius: float) -> np.ndarray:
+    """Which bonds ``bi[k]-bj[k]`` cross a ring disc, under minimum image.
+
+    The same test as :func:`paaf.cell.grow._segment_intersects_disc`, applied
+    to every bond at once: each bond is made continuous across the boundary,
+    then shifted to the periodic image nearest the ring. Called per ring over
+    thousands of bonds, the per-bond Python version was most of an export's
+    run time.
+    """
+    if len(bi) == 0:
+        return np.zeros(0, dtype=bool)
+    p0 = xyz[bi]
+    seg = xyz[bj] - p0
+    seg -= dims * np.round(seg / dims)
+    mid = p0 + 0.5 * seg
+    p0 = p0 - dims * np.round((mid - centre) / dims)
+    denom = seg @ normal
+    ok = np.abs(denom) >= 1e-9                    # not parallel to the plane
+    t = ((centre - p0) @ normal) / np.where(ok, denom, 1.0)
+    ok &= (t >= 0.0) & (t <= 1.0)
+    hit = p0 + t[:, None] * seg - centre
+    return ok & (np.einsum("ij,ij->i", hit, hit) <= radius * radius)
+
+
+def _near_disc(xyz, bi, bj, dims, centre, reach):
+    """Bonds whose midpoint lies within ``reach + 3`` Å of ``centre``."""
+    p0 = xyz[bi]
+    seg = xyz[bj] - p0
+    seg -= dims * np.round(seg / dims)
+    dm = p0 + 0.5 * seg - centre
+    dm -= dims * np.round(dm / dims)
+    return np.einsum("ij,ij->i", dm, dm) <= (reach + 3.0) ** 2
+
+
 def count_speared_rings(molecule: Molecule, dims: np.ndarray,
                         max_size: int = 8) -> Tuple[int, List[Tuple[int, int]]]:
     """Bonds that thread through a ring, in an all-atom cell.
@@ -758,8 +794,6 @@ def count_speared_rings(molecule: Molecule, dims: np.ndarray,
 
     Returns ``(count, offending_bonds)``.
     """
-    from .grow import _segment_intersects_disc
-
     rings = find_rings(molecule, max_size=max_size)
     if not rings:
         return 0, []
@@ -783,26 +817,19 @@ def count_speared_rings(molecule: Molecule, dims: np.ndarray,
         discs.append((centre, normal, radius))
         ring_atoms.append(set(r))
 
-    offenders: List[Tuple[int, int]] = []
-    for i, j, _ in molecule.bonds:
-        p0, p1 = xyz[i], xyz[j]
-        seg = p1 - p0
-        seg -= dims * np.round(seg / dims)
-        p1 = p0 + seg
-        for k, (centre, normal, radius) in enumerate(discs):
-            if i in ring_atoms[k] or j in ring_atoms[k]:
-                continue                  # a ring's own bonds
-            # Cheap reject before the exact test.
-            mid = 0.5 * (p0 + p1)
-            dm = mid - centre
-            dm -= dims * np.round(dm / dims)
-            if float(np.linalg.norm(dm)) > radius + 3.0:
-                continue
-            shift = np.round((mid - centre) / dims)
-            if _segment_intersects_disc(p0 - dims * shift, p1 - dims * shift,
-                                        centre, normal, radius):
-                offenders.append((i, j))
-                break
+    bi = np.array([b[0] for b in molecule.bonds], dtype=int)
+    bj = np.array([b[1] for b in molecule.bonds], dtype=int)
+    speared = np.zeros(len(bi), dtype=bool)
+    for k, (centre, normal, radius) in enumerate(discs):
+        # Cheap reject before the exact test; a ring's own bonds never count.
+        own = np.fromiter(ring_atoms[k], dtype=int)
+        cand = np.flatnonzero(
+            _near_disc(xyz, bi, bj, dims, centre, radius)
+            & ~np.isin(bi, own) & ~np.isin(bj, own))
+        if cand.size:
+            speared[cand] |= _bonds_through_disc(
+                xyz, bi[cand], bj[cand], dims, centre, normal, radius)
+    offenders = [(int(bi[k]), int(bj[k])) for k in np.flatnonzero(speared)]
     return len(offenders), offenders
 
 
@@ -831,8 +858,6 @@ def unthread_rings(molecule: Molecule, backbone_flags: Sequence[bool],
     and ~300 rings per cell, a few threads are near-certain at ANY seed and
     any workable density — eight seeds at two densities all threaded.
     """
-    from .grow import _segment_intersects_disc
-
     xyz = np.array([a.xyz for a in molecule.atoms], dtype=float)
     n = len(xyz)
     flags = np.asarray(backbone_flags, dtype=bool)
@@ -860,36 +885,17 @@ def unthread_rings(molecule: Molecule, backbone_flags: Sequence[bool],
     b_j = np.array([b[1] for b in molecule.bonds], dtype=int)
 
     def _candidates(anchor: np.ndarray, reach: float, group: set):
-        p0 = xyz[b_i]
-        seg = xyz[b_j] - p0
-        seg -= dims * np.round(seg / dims)
-        mid = p0 + 0.5 * seg
-        dm = mid - anchor
-        dm -= dims * np.round(dm / dims)
-        near = np.einsum("ij,ij->i", dm, dm) <= (reach + 3.0) ** 2
-        out = []
-        for k in np.where(near)[0]:
-            i, j = int(b_i[k]), int(b_j[k])
-            if i not in group and j not in group:
-                out.append((i, j))
-        return out
+        members = np.fromiter(group, dtype=int)
+        k = np.flatnonzero(_near_disc(xyz, b_i, b_j, dims, anchor, reach)
+                           & ~np.isin(b_i, members) & ~np.isin(b_j, members))
+        return b_i[k], b_j[k]
 
     def _intruders(ring_idx: np.ndarray, group: set, cand=None):
         centre, normal, radius = _disc(ring_idx)
-        hits = []
-        source = cand if cand is not None else _candidates(centre, radius,
+        ci, cj = cand if cand is not None else _candidates(centre, radius,
                                                            group)
-        for i, j in source:
-            p0 = xyz[i]
-            seg = xyz[j] - p0
-            seg -= dims * np.round(seg / dims)
-            p1 = p0 + seg
-            mid = 0.5 * (p0 + p1)
-            shift = np.round((mid - centre) / dims)
-            if _segment_intersects_disc(p0 - dims * shift, p1 - dims * shift,
-                                        centre, normal, radius):
-                hits.append((i, j))
-        return hits
+        hit = _bonds_through_disc(xyz, ci, cj, dims, centre, normal, radius)
+        return list(zip(ci[hit].tolist(), cj[hit].tolist()))
 
     unthreaded = 0
     for _sweep in range(passes):
@@ -1046,8 +1052,6 @@ def rotate_side_groups(molecule: Molecule, backbone_flags: Sequence[bool],
 
     Returns the number of groups that were rotated.
     """
-    from .grow import _segment_intersects_disc
-
     xyz = np.array([a.xyz for a in molecule.atoms], dtype=float)
     n = len(xyz)
     flags = np.asarray(backbone_flags, dtype=bool)
@@ -1078,27 +1082,12 @@ def rotate_side_groups(molecule: Molecule, backbone_flags: Sequence[bool],
         _u, _s, vt = np.linalg.svd(rel, full_matrices=False)
         normal = vt[-1]
         radius = float(np.linalg.norm(rel, axis=1).mean())
-        p0 = xyz[b_i_all]
-        seg = xyz[b_j_all] - p0
-        seg -= dims * np.round(seg / dims)
-        mid = p0 + 0.5 * seg
-        dm = mid - centre
-        dm -= dims * np.round(dm / dims)
-        near = np.where(np.einsum("ij,ij->i", dm, dm)
-                        <= (radius + 3.0) ** 2)[0]
-        for k in near:
-            i, j = int(b_i_all[k]), int(b_j_all[k])
-            if i in group_set or j in group_set:
-                continue
-            q0 = xyz[i]
-            sg = xyz[j] - q0
-            sg -= dims * np.round(sg / dims)
-            q1 = q0 + sg
-            shift = np.round((0.5 * (q0 + q1) - centre) / dims)
-            if _segment_intersects_disc(q0 - dims * shift, q1 - dims * shift,
-                                        centre, normal, radius):
-                return True
-        return False
+        members = np.fromiter(group_set, dtype=int)
+        k = np.flatnonzero(
+            _near_disc(xyz, b_i_all, b_j_all, dims, centre, radius)
+            & ~np.isin(b_i_all, members) & ~np.isin(b_j_all, members))
+        return bool(_bonds_through_disc(xyz, b_i_all[k], b_j_all[k], dims,
+                                        centre, normal, radius).any())
 
     rotated = 0
     for a in range(n):
@@ -1201,10 +1190,35 @@ def rotate_side_groups(molecule: Molecule, backbone_flags: Sequence[bool],
     return rotated
 
 
+def _constraint_classes(bi: np.ndarray, bj: np.ndarray) -> List[np.ndarray]:
+    """Split constraints into classes in which no two share an atom.
+
+    A greedy edge colouring. Within a class every correction touches a
+    distinct pair of atoms, so the whole class can be applied at once and the
+    result is exactly what one-at-a-time Gauss-Seidel would give for it.
+    Molecular graphs have low degree, so there are only a handful of classes.
+    """
+    colour = np.empty(len(bi), dtype=np.int64)
+    used: Dict[int, set] = {}
+    for k, (i, j) in enumerate(zip(bi.tolist(), bj.tolist())):
+        ui = used.setdefault(i, set())
+        uj = used.setdefault(j, set())
+        c = 0
+        while c in ui or c in uj:
+            c += 1
+        colour[k] = c
+        ui.add(c)
+        uj.add(c)
+    if len(colour) == 0:
+        return []
+    return [np.flatnonzero(colour == c) for c in range(int(colour.max()) + 1)]
+
+
 def _restore_bonds(xyz: np.ndarray, bi: np.ndarray, bj: np.ndarray,
                    target_len: np.ndarray, fixed: np.ndarray,
                    dims: np.ndarray, sweeps: int = 24,
-                   tol: float = 1e-4) -> None:
+                   tol: float = 1e-4,
+                   classes: Optional[List[np.ndarray]] = None) -> None:
     """Restore every bond to its original length, in place (SHAKE-style).
 
     Iterative pairwise correction over the whole bond list. Each pass moves
@@ -1217,9 +1231,16 @@ def _restore_bonds(xyz: np.ndarray, bi: np.ndarray, bj: np.ndarray,
     ring closure is just another entry in the bond list. Successive
     over-relaxation is not used — plain Gauss-Seidel converges quickly here
     since the displacements being corrected are small.
+
+    Gauss-Seidel runs over classes of constraints that share no atom
+    (:func:`_constraint_classes`), each class vectorised. Pass ``classes``
+    when calling repeatedly with the same bond list.
     """
     if len(bi) == 0:
         return
+    if classes is None:
+        classes = _constraint_classes(bi, bj)
+    fixed = np.asarray(fixed, dtype=bool)
     for _ in range(sweeps):
         d = xyz[bi] - xyz[bj]
         d -= dims * np.round(d / dims)
@@ -1227,44 +1248,52 @@ def _restore_bonds(xyz: np.ndarray, bi: np.ndarray, bj: np.ndarray,
         err = r - target_len
         if np.max(np.abs(err)) < tol:
             return
-        bad = np.where(np.abs(err) > tol)[0]
-        for k in bad:
-            i, j = int(bi[k]), int(bj[k])
-            fi, fj = bool(fixed[i]), bool(fixed[j])
-            if fi and fj:
-                continue                       # both pinned: nothing to do
+        bad_now = np.abs(err) > tol
+        for cls in classes:
+            ks = cls[bad_now[cls]]
+            if ks.size == 0:
+                continue
+            i, j = bi[ks], bj[ks]
+            fi, fj = fixed[i], fixed[j]
+            movable = ~(fi & fj)               # both pinned: nothing to do
+            ks, i, j, fi, fj = ks[movable], i[movable], j[movable], \
+                fi[movable], fj[movable]
+            if ks.size == 0:
+                continue
             v = xyz[i] - xyz[j]
             v -= dims * np.round(v / dims)
-            nv = float(np.linalg.norm(v))
-            if nv < 1e-9:
-                # A DIFFERENT direction for each collapsed bond.
-                #
-                # This used to be [1, 0, 0] for every one of them. A carbon
-                # whose two hydrogens had both collapsed onto it therefore had
-                # both restored along +x, to exactly the same point — measured
-                # on a real PE/PS cell, 333 pairs of hydrogens on the same
-                # carbon at 0.000 A separation. DL_FIELD perceives bonds from
-                # geometry, read those zero-length H...H pairs as bonds, and
-                # reported cyclopropyl rings and alkenes in a saturated blend
-                # before stopping on an untypable atom.
-                #
-                # Any direction restores the bond length; they just must not
-                # all be the same one. Derived from the atom indices so a
-                # rebuild is reproducible.
-                v = np.random.default_rng(
-                    (i * 1000003 + j) & 0xFFFFFFFF).normal(size=3)
-                nrm = float(np.linalg.norm(v))
-                v = v / nrm if nrm > 1e-12 else np.array([1.0, 0.0, 0.0])
-                nv = 1.0
-            u = v / nv
-            corr = (nv - target_len[k]) * u
-            if fj:
-                xyz[i] -= corr
-            elif fi:
-                xyz[j] += corr
-            else:
-                xyz[i] -= 0.5 * corr
-                xyz[j] += 0.5 * corr
+            nv = np.sqrt(np.einsum("ij,ij->i", v, v))
+            for m in np.flatnonzero(nv < 1e-9):
+                v[m] = _collapsed_direction(int(i[m]), int(j[m]))
+                nv[m] = 1.0
+            u = v / nv[:, None]
+            corr = (nv - target_len[ks])[:, None] * u
+            w_i = np.where(fj, 1.0, np.where(fi, 0.0, 0.5))
+            w_j = np.where(fi, 1.0, np.where(fj, 0.0, 0.5))
+            xyz[i] -= w_i[:, None] * corr
+            xyz[j] += w_j[:, None] * corr
+
+
+def _collapsed_direction(i: int, j: int) -> np.ndarray:
+    """Restore direction for a bond that has collapsed to zero length."""
+    # A DIFFERENT direction for each collapsed bond.
+    #
+    # This used to be [1, 0, 0] for every one of them. A carbon
+    # whose two hydrogens had both collapsed onto it therefore had
+    # both restored along +x, to exactly the same point — measured
+    # on a real PE/PS cell, 333 pairs of hydrogens on the same
+    # carbon at 0.000 A separation. DL_FIELD perceives bonds from
+    # geometry, read those zero-length H...H pairs as bonds, and
+    # reported cyclopropyl rings and alkenes in a saturated blend
+    # before stopping on an untypable atom.
+    #
+    # Any direction restores the bond length; they just must not
+    # all be the same one. Derived from the atom indices so a
+    # rebuild is reproducible.
+    v = np.random.default_rng(
+        (i * 1000003 + j) & 0xFFFFFFFF).normal(size=3)
+    nrm = float(np.linalg.norm(v))
+    return v / nrm if nrm > 1e-12 else np.array([1.0, 0.0, 0.0])
 
 
 def relax_substituents(molecule: Molecule, backbone_flags: Sequence[bool],
@@ -1401,6 +1430,7 @@ def relax_substituents(molecule: Molecule, backbone_flags: Sequence[bool],
 
     mobile_set = set(int(i) for i in mobile)
     rng = np.random.default_rng(0xC0FFEE)
+    restore_classes = _constraint_classes(bond_i, bond_j)
     for _ in range(iterations):
         # Wrap into the primary image: cKDTree's boxsize requires it, and a
         # coordinate that has drifted outside raises rather than wrapping.
@@ -1457,7 +1487,8 @@ def relax_substituents(molecule: Molecule, backbone_flags: Sequence[bool],
         if not np.any(disp):
             break
         xyz += disp
-        _restore_bonds(xyz, bond_i, bond_j, bond_len0, flags, dims)
+        _restore_bonds(xyz, bond_i, bond_j, bond_len0, flags, dims,
+                       classes=restore_classes)
 
     for k, a in enumerate(molecule.atoms):
         a.xyz = xyz[k]

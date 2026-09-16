@@ -51,8 +51,8 @@ The method, in the order it is applied per step
    against 6.78 for the same chain unperturbed. Correcting it requires
    carrying the Rosenbluth weight through and using it in every average,
    which is not implemented here. So: ``scan_depth=0`` when chain dimensions
-   matter, ``scan_depth>0`` only when attrition would otherwise stop the cell
-   being built at all.
+   matter. Attrition no longer needs it — dead ends are backtracked (see
+   :func:`grow_amorphous_cell`, "It never fails").
 5. **Spearing rejection.** Reject any step whose new bond passes through a
    ring. Threaded rings survive energy minimisation happily and are a classic
    silent failure of constructed cells.
@@ -463,6 +463,16 @@ class GrowthResult:
     n_rejected_overlap: int = 0
     n_rejected_spearing: int = 0
     n_restarts: int = 0
+    #: Dead ends escaped by retracting and regrowing a few beads.
+    n_backtracks: int = 0
+    #: Steps where every state was blocked even after backtracking and a
+    #: fresh start, so the least-crowded one was taken. Relief then cleared
+    #: the contacts; ``n_contacts`` says whether it fully could.
+    n_forced: int = 0
+    #: Non-bonded pairs still inside the overlap criterion in the returned
+    #: cell. Zero unless the request was physically impossible to meet.
+    n_contacts: int = 0
+    min_nonbonded_distance: float = float("inf")
     notes: List[str] = field(default_factory=list)
 
     def summary(self) -> str:
@@ -475,6 +485,10 @@ class GrowthResult:
             f"torsion pops   : " + ", ".join(f"{p:.3f}" for p in self.torsion_populations),
             f"rejected       : {self.n_rejected_overlap} overlap, "
             f"{self.n_rejected_spearing} spearing, {self.n_restarts} restarts",
+            f"dead ends      : {self.n_backtracks} backtracked, "
+            f"{self.n_forced} forced",
+            f"closest pair   : {self.min_nonbonded_distance:.2f} Å, "
+            f"{self.n_contacts} contact(s) inside tolerance",
         ]
         lines.extend(f"note           : {n}" for n in self.notes)
         return "\n".join(lines)
@@ -531,7 +545,7 @@ def _candidate_energy(grid: NeighbourGrid, point: np.ndarray, radius: float,
 def _lookahead_weight(model: RISModel, grid: NeighbourGrid, radius: float,
                       b: np.ndarray, c: np.ndarray, d: np.ndarray,
                       prev_state: int, depth: int, beta: float,
-                      temperature: float, exclude: set,
+                      temperature: float, mol_id: int,
                       dims: np.ndarray) -> float:
     """Meirovitch look-ahead: total surviving weight of continuations.
 
@@ -561,64 +575,14 @@ def _lookahead_weight(model: RISModel, grid: NeighbourGrid, radius: float,
     for nxt in range(model.n_states):
         e = place_atom(b, c, d, l, theta, angles[nxt])
         ew = wrap(e[None], dims)[0]
-        en = grid.soft_energy(ew, radius, exclude_slots=exclude)
+        en = grid.soft_energy(ew, radius, exclude_mol=mol_id)
         w = u[prev_state, nxt] * math.exp(-beta * min(en, 200.0))
         if w <= 0.0:
             continue
         total += w * _lookahead_weight(
             model, grid, radius, c, d, e, nxt, depth - 1, beta,
-            temperature, exclude, dims)
+            temperature, mol_id, dims)
     return total
-
-
-def total_mass_amu_of(specs: Sequence[GrowSpec],
-                      masses: Sequence[float]) -> float:
-    return sum(m * int(s.n_chains) * int(s.degree_of_polymerisation)
-               for m, s in zip(masses, specs))
-
-
-def _growth_failure_message(label: str, chain_index: int, placed: int,
-                            total_chains: int, dp: int, n_beads: int,
-                            tolerance: float, scan_depth: int, scale: float,
-                            max_restarts: int, density_g_cm3: float) -> str:
-    """Explain a failed cell in terms of what the user can actually change.
-
-    A bare "the box is too dense" is not much help when 27 of 30 chains went
-    in fine. What matters is *how far it got* and which of the knobs is
-    actually binding, so the message leads with the progress and puts the
-    measured trade-off next to the suggestion.
-    """
-    lines = [
-        f"Could not grow chain {chain_index + 1} of '{label}' after "
-        f"{max_restarts} restarts.",
-        "",
-        f"{placed} of {total_chains} chains were placed before this one. "
-        f"Chains go in one at a time, so the later ones grow into a box that "
-        f"is already near its final density ({density_g_cm3:.3f} g/cm³) — "
-        f"the hardest species is grown first for exactly this reason.",
-        "",
-        "In order of what usually helps:",
-    ]
-    if tolerance > 1.75:
-        lines.append(
-            f"  1. LOWER the overlap tolerance. It is {tolerance:.2f} Å, and "
-            f"that is the binding constraint here. Measured on polyethylene "
-            f"at melt density, 2.0 Å built 1 cell in 3 and 1.7 Å built 3 in "
-            f"3. It is a guard against unrepairable overlap, not the physical "
-            f"contact distance — the soft bias already handles that.")
-    else:
-        lines.append(
-            f"  1. Lower the target density, or shorten the chains "
-            f"(DP {dp} = {n_beads} skeletal atoms; every one of those steps "
-            f"is a chance to dead-end).")
-    lines.extend([
-        f"  2. Raise the look-ahead depth from {scan_depth} to 1 or 2. It "
-        f"defeats attrition, but it biases chain dimensions (Rosenbluth) — "
-        f"use it to get a cell built, not to quote C_n from.",
-        f"  3. Reduce the interpenetration scale (currently {scale}).",
-        f"  4. Try a different random seed; failure is partly luck.",
-    ])
-    return "\n".join(lines)
 
 
 def grow_amorphous_cell(
@@ -632,7 +596,7 @@ def grow_amorphous_cell(
     scale: float = 0.55,
     seed: int = 12345,
     check_spearing: bool = True,
-    max_restarts: int = 20,
+    max_restarts: int = 4,
     progress: Optional[ProgressFn] = None,
     cancel: Optional[CancelToken] = None,
 ) -> GrowthResult:
@@ -663,16 +627,37 @@ def grow_amorphous_cell(
           1.7 Å        3 / 3        5.74     <- default
           1.5 Å        3 / 3        5.27
 
-    Raising ``max_restarts`` instead is a *worse* fix: at 2.0 Å going from 30
-    to 150 restarts only reached 2/3 and pulled C_n down to 4.97, because
-    surviving a restart selects for compact chains. That is a silent bias;
-    losing a little hard-core radius is not.
+    (Measured before dead ends were handled by recoil; the table is why the
+    default is 1.7, not a statement about how often a build now fails.)
+
+    It never fails
+    --------------
+    A build always returns a cell, whatever the density, chain count or
+    tolerance. Three layers, each only reached when the one before runs out:
+
+    1. **Recoil** inside a chain — a dead end retracts a few beads and
+       regrows them (:func:`_grow_one_chain`).
+    2. **Fresh start** — ``max_restarts`` new seeds for that chain, each
+       placed in the roomiest of several random points.
+    3. **Forced placement, then relief** — the last attempt takes the
+       least-crowded state at a dead end instead of giving up, and
+       :func:`paaf.cell.contact_relief.relieve_contacts` pushes the resulting
+       contacts apart with bonds and angles held, then projects them back to
+       their exact values.
+
+    The result says which layers were needed (``n_backtracks``,
+    ``n_restarts``, ``n_forced``) and how clean the cell is
+    (``n_contacts``, ``min_nonbonded_distance``). A request that is
+    physically impossible — beads that cannot fit at the tolerance at that
+    density — still returns, with the remaining contacts counted and a note
+    saying so, rather than a cell that silently is not what was asked.
 
     Raises
     ------
     PackFailed
-        With a message naming what to change (lower the density, raise
-        ``scan_depth``, shorten the chains).
+        Only for input that describes nothing to build.
+    PackCancelled
+        When ``cancel`` is set.
     """
     if not specs:
         raise PackFailed("No species given — nothing to grow.")
@@ -770,9 +755,17 @@ def grow_amorphous_cell(
             f"goes first.")
 
     # Cutoff must cover the largest contact distance we ever test.
+    # One neighbour query per growth step covers every trial position, and
+    # those lie a bond length from the tip — so a cell must span the largest
+    # contact distance PLUS the longest bond (see _probe).
     max_r = max(radii)
-    cutoff = max(tolerance, max_r * 2.0) + 1.0
-    grid = NeighbourGrid(dims, cutoff, capacity=max(total_beads * 2, 64))
+    if any(sp.is_copolymer for sp in specs):
+        max_r = max([max_r] + [
+            _effective_bead_radius(mo.mass_amu / max(mo.backbone_atoms, 1))
+            for sp in specs if sp.is_copolymer for mo in sp.monomers])
+    max_bond = max(m.bond_length_a for m in models)
+    cutoff = max(tolerance, max_r * max(scale, 1.0)) + max_bond + 0.25
+    grid = NeighbourGrid(dims, cutoff, capacity=max(total_beads + 64, 64))
 
     # Ring list for the spearing test. It stays EMPTY at skeletal-bead
     # resolution, and that is not an oversight: a pendant ring is not
@@ -791,6 +784,9 @@ def grow_amorphous_cell(
     n_overlap = 0
     n_spear = 0
     n_restart = 0
+    n_backtrack = 0
+    n_forced = 0
+    n_forced_chains = 0
     placed = 0
 
     for si in order:
@@ -822,41 +818,29 @@ def grow_amorphous_cell(
                 bead_radii = np.full(n_beads, radius)
                 chain_mass = masses[si] * dp
 
+            # Strict attempts first; the last one may force a step rather
+            # than fail, and relief below clears what it forced.
             grown = None
-            for attempt in range(max_restarts):
-                out = _grow_one_chain(
+            n_attempts = max(int(max_restarts), 0) + 1
+            for attempt in range(n_attempts):
+                grown = _grow_one_chain(
                     model, grid, dims, bead_radii, n_beads, beta, temperature,
-                    rng, tolerance, scale, scan_depth, check_spearing, rings)
-                if out is not None:
-                    grown, rej_o, rej_s, states = out
-                    n_overlap += rej_o
-                    n_spear += rej_s
+                    rng, tolerance, scale, scan_depth, check_spearing, rings,
+                    mol_id=placed, force=attempt == n_attempts - 1,
+                    cancel=cancel)
+                if grown is not None:
                     break
                 n_restart += 1
-            if grown is None:
-                raise PackFailed(_growth_failure_message(
-                    label, ci, placed, total_chains, dp, n_beads,
-                    tolerance, scan_depth, scale, max_restarts,
-                    density_g_cm3=(total_mass_amu_of(specs, masses)
-                                   / _N_AVOGADRO) / (volume_a3 * 1e-24)))
+            n_overlap += grown.n_overlap
+            n_spear += grown.n_spear
+            n_backtrack += grown.n_backtracks
+            if grown.n_forced:
+                n_forced += grown.n_forced
+                n_forced_chains += 1
 
-            wrapped = wrap(grown, dims)
-            grid.add(wrapped, bead_radii[:len(wrapped)], mol_id=placed)
-            # Statistics use the UNWRAPPED coordinates — wrapping would break
-            # the end-to-end vector across the periodic boundary.
-            stats = ChainStats(
-                species=label,
-                n_beads=len(grown),
-                n_repeat_units=dp,
-                sequence=seq,
-                r_end_to_end=float(np.linalg.norm(grown[-1] - grown[0])),
-                radius_of_gyration=_rg(grown),
-                c_n=characteristic_ratio(grown, model.bond_length_a),
-                torsion_populations=tuple(state_populations(
-                    states, model.n_states)),
-            )
-            grown_by_species[si].append((wrapped, stats, label, seq,
-                                         chain_mass))
+            grown_by_species[si].append(
+                [grown.positions, bead_radii[:len(grown.positions)], label,
+                 seq, chain_mass, grown.states, model, dp])
             placed += 1
             emit(progress, placed=placed, total=total_chains,
                  attempts=n_overlap + n_spear, current_species=label,
@@ -864,20 +848,57 @@ def grow_amorphous_cell(
                  fraction=placed / max(total_chains, 1))
 
     # ---- assemble in the caller's species order ---------------------
+    records = [r for si in range(len(specs)) for r in grown_by_species[si]]
+    from .contact_relief import ChainTopology, relieve_contacts
+    topo = ChainTopology.from_chains(
+        [len(r[0]) for r in records], [r[1] for r in records],
+        [r[6].bond_length_a for r in records],
+        [r[6].bond_angle_deg for r in records])
+    flat = wrap(np.concatenate([r[0] for r in records]), dims)
+    if n_forced:
+        emit(progress, placed=placed, total=total_chains,
+             attempts=n_overlap + n_spear, current_species="",
+             message=f"relieving {n_forced} crowded step(s) "
+                     f"in {n_forced_chains} chain(s) …",
+             fraction=1.0)
+    flat, contacts = relieve_contacts(flat, dims, topo, tolerance=tolerance,
+                                      scale=scale, cancel=cancel)
+
     all_atoms: List[Atom] = []
     all_bonds: List[Tuple[int, int, float]] = []
     chains: List[ChainStats] = []
     grown_mass = 0.0
-    for si in range(len(specs)):
-        for wrapped, stats, label, seq, chain_mass in grown_by_species[si]:
-            grown_mass += chain_mass
-            base = len(all_atoms)
-            for k, p in enumerate(wrapped):
-                all_atoms.append(Atom(index=base + k, element="C",
-                                      xyz=p, name=f"{label[:3]}{base + k + 1}"))
-            for k in range(len(wrapped) - 1):
-                all_bonds.append((base + k, base + k + 1, 1.0))
-            chains.append(stats)
+    base = 0
+    for (unwrapped, _r, label, seq, chain_mass, states, model, dp) in records:
+        n = len(unwrapped)
+        wrapped = flat[base:base + n]
+        if contacts.iterations:
+            # Relief moved beads: rebuild the continuous chain from the moved
+            # positions so the statistics describe the cell actually written.
+            steps = np.diff(wrapped, axis=0)
+            steps -= dims * np.round(steps / dims)
+            unwrapped = np.vstack([wrapped[:1],
+                                   wrapped[0] + np.cumsum(steps, axis=0)])
+        grown_mass += chain_mass
+        for k, p in enumerate(wrapped):
+            all_atoms.append(Atom(index=base + k, element="C",
+                                  xyz=p, name=f"{label[:3]}{base + k + 1}"))
+        for k in range(n - 1):
+            all_bonds.append((base + k, base + k + 1, 1.0))
+        # Statistics use the UNWRAPPED coordinates — wrapping would break
+        # the end-to-end vector across the periodic boundary.
+        chains.append(ChainStats(
+            species=label,
+            n_beads=n,
+            n_repeat_units=dp,
+            sequence=seq,
+            r_end_to_end=float(np.linalg.norm(unwrapped[-1] - unwrapped[0])),
+            radius_of_gyration=_rg(unwrapped),
+            c_n=characteristic_ratio(unwrapped, model.bond_length_a),
+            torsion_populations=tuple(state_populations(
+                states, model.n_states)),
+        ))
+        base += n
 
     mol = Molecule(atoms=all_atoms, bonds=all_bonds, name="amorphous_cell")
     try:
@@ -915,6 +936,23 @@ def grow_amorphous_cell(
         "chain grown in isolation, about +20%. Real melts screen excluded "
         "volume and sit near the unperturbed dimensions, so treat a cell's "
         "C_n as an upper bound and re-measure after equilibration.")
+    if n_forced:
+        notes.append(
+            f"{n_forced} growth step(s) in {n_forced_chains} chain(s) had no "
+            f"free rotational state even after backtracking, so the "
+            f"least-crowded one was taken and the contacts were then pushed "
+            f"apart with bond lengths and angles held "
+            f"({contacts.iterations} relief iterations). Those chains' "
+            f"torsions were adjusted by the relief and are slightly off the "
+            f"RIS lattice; the rest of the cell is untouched.")
+    if contacts.n_contacts:
+        notes.append(
+            f"{contacts.n_contacts} non-bonded pair(s) remain closer than the "
+            f"overlap criterion (closest {contacts.min_distance:.2f} Å, "
+            f"tolerance {tolerance:.2f} Å). The beads do not fit at this "
+            f"density and tolerance — the cell was built anyway so it can be "
+            f"relaxed, but lower 'Build at' or the tolerance for a clean "
+            f"construction.")
     if scan_depth > 0:
         notes.append(
             f"scan_depth={scan_depth}: look-ahead is ON. It defeats attrition "
@@ -932,8 +970,122 @@ def grow_amorphous_cell(
         density_kg_m3=density, mean_c_n=mean_c,
         torsion_populations=tuple(pops),
         n_rejected_overlap=n_overlap, n_rejected_spearing=n_spear,
-        n_restarts=n_restart, notes=notes,
+        n_restarts=n_restart, n_backtracks=n_backtrack, n_forced=n_forced,
+        n_contacts=contacts.n_contacts,
+        min_nonbonded_distance=contacts.min_distance, notes=notes,
     )
+
+
+def _probe(grid: NeighbourGrid, dims: np.ndarray, centre: np.ndarray,
+           points: np.ndarray, radius: float, tolerance: float, scale: float,
+           mol_id: int, n_recent: int):
+    """Clash test, soft energy and clearance for several trial points at once.
+
+    Every trial position for one growth step lies within one bond length of
+    the chain tip, so a single neighbour query around ``centre`` (the wrapped
+    tip) covers all of them — one query per step instead of two per state.
+    The grid cutoff is sized for this in :func:`grow_amorphous_cell`.
+
+    Beads of the chain being grown (``mol_id``) are in the grid too. Its
+    ``n_recent`` newest beads — the 1-2, 1-3 and 1-4 partners of the bead
+    being placed — are skipped; the rest are tested against ``tolerance``
+    alone and carry no soft energy, which is exactly how the self-avoidance
+    test worked before the chain was put into the grid.
+
+    Returns ``(hard, energy, clearance)``, one entry per point. ``clearance``
+    is min(r / criterion): below 1 is a hard overlap, and the largest value is
+    the least-bad choice when every state is blocked.
+    """
+    s = len(points)
+    hard = np.zeros(s, dtype=bool)
+    energy = np.zeros(s)
+    clearance = np.full(s, np.inf)
+    slots = grid._candidates(centre)
+    if slots is None:
+        return hard, energy, clearance
+    if n_recent:
+        slots = slots[slots < grid.n_atoms - n_recent]
+        if slots.size == 0:
+            return hard, energy, clearance
+    rad = grid._rad[slots]
+    own = grid._mol[slots] == mol_id
+    d = grid._pos[slots][None, :, :] - points[:, None, :]
+    d -= dims * np.round(d / dims)
+    r2 = np.einsum("smk,smk->sm", d, d)
+    cut = np.where(own, tolerance,
+                   np.maximum(tolerance, 0.5 * (rad + radius) * scale))
+    ratio2 = r2 / (cut * cut)
+    clearance = np.sqrt(ratio2.min(axis=1))
+    hard = clearance < 1.0
+    sigma2 = (0.5 * (rad + radius)) ** 2
+    close = (r2 < sigma2) & ~own
+    if np.any(close):
+        frac = np.where(close, sigma2 / np.maximum(r2, 1e-6), 0.0)
+        energy = _SOFT_EPSILON * np.minimum(frac ** 6, 1e6).sum(axis=1)
+    return hard, energy, clearance
+
+
+_SOFT_EPSILON = 0.2          # same as NeighbourGrid.soft_energy's default
+
+
+def _state_offsets(model: RISModel) -> np.ndarray:
+    """Local NeRF coordinates of the next atom for every torsion state.
+
+    Row ``s`` is exactly the ``d2`` vector :func:`paaf.cell.ris.place_atom`
+    builds for state ``s``; computing them once per chain instead of once per
+    state per step is most of what makes growth fast.
+    """
+    theta = math.radians(model.bond_angle_deg)
+    phi = np.radians(np.asarray(model.state_angles_deg, dtype=float))
+    l = model.bond_length_a
+    return np.stack([np.full_like(phi, -l * math.cos(theta)),
+                     l * math.sin(theta) * np.cos(phi),
+                     l * math.sin(theta) * np.sin(phi)], axis=1)
+
+
+def _place_states(a: np.ndarray, b: np.ndarray, c: np.ndarray,
+                  offsets: np.ndarray) -> np.ndarray:
+    """All candidate positions for one step — :func:`place_atom`, vectorised.
+
+    Same frame, same convention: ``bc`` along the bond, ``n`` normal to the
+    A-B-C plane, ``m = n x bc``. Written with scalar arithmetic because
+    ``np.cross`` on single 3-vectors costs more than the whole rest of a step.
+    """
+    bx, by, bz = c[0] - b[0], c[1] - b[1], c[2] - b[2]
+    inv = 1.0 / math.sqrt(bx * bx + by * by + bz * bz)
+    bx, by, bz = bx * inv, by * inv, bz * inv
+    ax, ay, az = b[0] - a[0], b[1] - a[1], b[2] - a[2]
+    nx, ny, nz = ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx
+    nn = math.sqrt(nx * nx + ny * ny + nz * nz)
+    if nn < 1e-9:
+        return _place_states_collinear(a, b, c, offsets)
+    nx, ny, nz = nx / nn, ny / nn, nz / nn
+    frame = np.array([[bx, by, bz],
+                      [ny * bz - nz * by, nz * bx - nx * bz, nx * by - ny * bx],
+                      [nx, ny, nz]])
+    return c + offsets @ frame
+
+
+def _place_states_collinear(a, b, c, offsets):
+    """A, B, C collinear: any perpendicular will do, as in place_atom."""
+    bc = (c - b) / np.linalg.norm(c - b)
+    helper = np.array([1.0, 0.0, 0.0])
+    if abs(bc @ helper) > 0.9:
+        helper = np.array([0.0, 1.0, 0.0])
+    n = np.cross(bc, helper)
+    n /= np.linalg.norm(n)
+    m = np.cross(n, bc)
+    return c + offsets @ np.stack([bc, m, n])
+
+
+@dataclass
+class _Grown:
+    positions: np.ndarray
+    states: np.ndarray
+    n_overlap: int = 0
+    n_spear: int = 0
+    n_backtracks: int = 0
+    n_forced: int = 0
 
 
 def _grow_one_chain(model: RISModel, grid: NeighbourGrid, dims: np.ndarray,
@@ -941,122 +1093,160 @@ def _grow_one_chain(model: RISModel, grid: NeighbourGrid, dims: np.ndarray,
                     temperature: float,
                     rng: np.random.Generator, tolerance: float, scale: float,
                     scan_depth: int, check_spearing: bool,
-                    rings: List[_Ring]):
-    """Grow one chain of ``n_beads`` skeletal atoms.
+                    rings: List[_Ring], *, mol_id: int = 0,
+                    force: bool = False,
+                    cancel: Optional[CancelToken] = None) -> Optional[_Grown]:
+    """Grow one chain of ``n_beads`` skeletal atoms, adding it to ``grid``.
 
     ``radii`` is per bead, not a single value: in a copolymer each bead takes
     its size from the monomer it belongs to, and an isoprene bead is not the
     same size as an epoxidised one.
 
-    Returns ``(positions, n_overlap, n_spear, states)``.
+    Dead ends — every rotational state blocked — are handled by **recoil**
+    (Consta, Wilding, Frenkel & Smit, *J. Chem. Phys.* **110** (1999) 3220):
+    retract the last few beads and regrow them. Retracting two beads is
+    usually enough; if the walk dead-ends again without getting past the
+    same point, the retreat doubles, so a tip caged by its neighbours backs
+    out of the cage instead of retrying the same trap. Losing a whole chain
+    over one blocked step, as a plain restart does, is what made long chains
+    in a filled box fail.
 
-    ``None`` means the chain died — the caller restarts it from a fresh seed
-    position. Restarting a chain is cheap compared with a failed cell.
+    When the dead-end budget runs out, a strict attempt removes its beads and
+    returns ``None`` (the caller tries a fresh start). With ``force=True`` it
+    instead takes the least-crowded state and counts it in ``n_forced``; the
+    caller clears those contacts afterwards with
+    :func:`paaf.cell.contact_relief.relieve_contacts`. A forced chain always
+    completes.
     """
     l, theta = model.bond_length_a, model.bond_angle_deg
     angles = np.asarray(model.state_angles_deg, dtype=float)
     n_states = model.n_states
-    max_local_tries = 40
-
-    # --- seed the first three beads somewhere with room
-    start = None
-    for _ in range(200):
-        p0 = rng.random(3) * dims
-        if not grid.overlaps(p0[None], radii[:1], tolerance, scale):
-            start = p0
-            break
-    if start is None:
-        return None
-
-    pos = [start]
-    # Second bead: random direction at the fixed bond length.
-    for _ in range(max_local_tries):
-        v = rng.normal(size=3)
-        v /= np.linalg.norm(v)
-        p1 = pos[0] + l * v
-        if not grid.overlaps(wrap(p1[None], dims), radii[1:2],
-                             tolerance, scale):
-            pos.append(p1)
-            break
-    if len(pos) < 2:
-        return None
-
-    # Third bead: fixed bond angle, random azimuth.
-    for _ in range(max_local_tries):
-        ref = pos[0] + rng.normal(size=3)
-        p2 = place_atom(ref, pos[0], pos[1], l, theta,
-                        float(rng.uniform(-180, 180)))
-        if not grid.overlaps(wrap(p2[None], dims), radii[2:3],
-                             tolerance, scale):
-            pos.append(p2)
-            break
-    if len(pos) < 3:
-        return None
-
-    own_slots: set = set()      # this chain is not yet in the grid, so empty
-    states: List[int] = []
-    n_overlap = 0
-    n_spear = 0
     u = model.u_matrix(temperature)
+    offsets = _state_offsets(model)
+    first_slot = grid.n_atoms
+    out = _Grown(positions=np.zeros((0, 3)), states=np.zeros(0, dtype=int))
+
+    def abandon():
+        grid.remove_last(grid.n_atoms - first_slot)
+        return None
+
+    def put(p: np.ndarray, k: int) -> None:
+        pos.append(p)
+        grid.add(wrap(p[None], dims), radii[k:k + 1], mol_id=mol_id)
+
+    pos: List[np.ndarray] = []
+
+    # --- seed: the roomiest of a handful of random points. Starting in a
+    # void rather than at the first legal point is what lets the last chains
+    # into a nearly full box; the start is still uniformly random at low fill.
+    best, best_c = None, -1.0
+    for trial in range(200):
+        pts = rng.random((8, 3)) * dims
+        _, _, c = _probe(grid, dims, pts[0], pts[:1], float(radii[0]),
+                         tolerance, scale, mol_id, 0)
+        for p in pts[1:]:
+            _, _, cc = _probe(grid, dims, p, p[None], float(radii[0]),
+                              tolerance, scale, mol_id, 0)
+            c = np.append(c, cc)
+        j = int(np.argmax(c))
+        if c[j] > best_c:
+            best, best_c = pts[j], float(c[j])
+        if best_c >= 1.0:
+            break
+    if best_c < 1.0 and not force:
+        return None
+    put(best, 0)
+
+    # --- second bead: random direction; third: fixed angle, random azimuth.
+    for k in (1, 2):
+        if n_beads <= k:
+            break
+        trials = np.empty((24, 3))
+        for t in range(24):
+            if k == 1:
+                v = rng.normal(size=3)
+                trials[t] = pos[0] + l * v / np.linalg.norm(v)
+            else:
+                ref = pos[0] + rng.normal(size=3)
+                trials[t] = place_atom(ref, pos[0], pos[1], l, theta,
+                                       float(rng.uniform(-180, 180)))
+        tw = wrap(trials, dims)
+        _, _, c = _probe(grid, dims, wrap(pos[-1][None], dims)[0], tw,
+                         float(radii[k]), tolerance, scale, mol_id, k)
+        ok = np.flatnonzero(c >= 1.0)
+        if ok.size:
+            pick = int(ok[0])
+        elif force:
+            pick = int(np.argmax(c))
+            out.n_forced += 1
+        else:
+            return abandon()
+        put(trials[pick], k)
+
+    states: List[int] = []
+    budget = 60 + 2 * n_beads           # dead ends tolerated per attempt
+    dead_ends = 0
+    frontier, retreat = -1, 2
 
     while len(pos) < n_beads:
         k = len(pos)                      # index of the bead being placed
+        if k % 512 == 0:
+            check_cancel(cancel)
         a, b, c = pos[-3], pos[-2], pos[-1]
         prev_state = states[-1] if states else 0
 
-        # --- weight every rotational isomeric state
-        weights = np.zeros(n_states)
-        cands: List[Optional[np.ndarray]] = [None] * n_states
-        for s in range(n_states):
-            d = place_atom(a, b, c, l, theta, angles[s])
-            dw = wrap(d[None], dims)[0]
+        cands = _place_states(a, b, c, offsets)
+        cw = wrap(cands, dims)
+        rk = float(radii[k])
+        hard, energy, clear = _probe(grid, dims, wrap(c[None], dims)[0], cw,
+                                     rk, tolerance, scale, mol_id, 3)
+        out.n_overlap += int(hard.sum())
+        if check_spearing and rings:
+            for s in range(n_states):
+                if not hard[s] and any(
+                        _segment_intersects_disc(c, cands[s], r.centre,
+                                                 r.normal, r.radius)
+                        for r in rings):
+                    hard[s] = True
+                    out.n_spear += 1
 
-            # Hard rejection first — cheaper than the energy, and a hard
-            # overlap must never be reachable however favourable the RIS
-            # weight is.
-            if grid.overlaps(dw[None], radii[k:k + 1], tolerance, scale):
-                n_overlap += 1
-                continue
-            # Self-avoidance within the chain: skip the three most recent
-            # beads — the 1-2, 1-3 AND 1-4 partners — and test the rest.
-            # The 1-4 pair is excluded because its distance is set by the
-            # torsion being chosen, and a gauche state legitimately brings it
-            # inside the tolerance.
-            if len(pos) > 3:
-                tail = np.asarray(pos[:-3])
-                delta = tail - d
-                delta -= dims * np.round(delta / dims)
-                if np.any(np.einsum("ij,ij->i", delta, delta)
-                          < (tolerance * tolerance)):
-                    n_overlap += 1
-                    continue
-            if check_spearing and rings:
-                if any(_segment_intersects_disc(c, d, r.centre, r.normal,
-                                                r.radius) for r in rings):
-                    n_spear += 1
-                    continue
-
-            cands[s] = d
-            e = grid.soft_energy(dw, float(radii[k]),
-                                 exclude_slots=own_slots)
-            boltz = math.exp(-beta * min(e, 200.0))
-            if scan_depth > 0:
+        # P(phi) ∝ w_RIS · exp(-E_nb / kT)   — Theodorou–Suter eq. for the
+        # conditional torsion probability.
+        weights = u[prev_state] * np.exp(-beta * np.minimum(energy, 200.0))
+        weights[hard] = 0.0
+        if scan_depth > 0:
+            for s in np.flatnonzero(weights > 0.0):
                 # Look ahead from the frame this candidate CREATES. The
-                # candidate's own weight is applied once, below.
-                boltz *= _lookahead_weight(
-                    model, grid, float(radii[k]), b, c, d, s, scan_depth,
-                    beta,
-                    temperature, own_slots, dims)
-            # P(phi) ∝ w_RIS · exp(-E_nb / kT)   — Theodorou–Suter eq. for the
-            # conditional torsion probability.
-            weights[s] = u[prev_state, s] * boltz
+                # candidate's own weight is applied once, above.
+                weights[s] *= _lookahead_weight(
+                    model, grid, rk, b, c, cands[s], int(s), scan_depth,
+                    beta, temperature, mol_id, dims)
 
-        total = weights.sum()
-        if total <= 0.0:
-            return None                      # dead end: caller restarts
+        total = float(weights.sum())
+        if total > 0.0:
+            s = int(rng.choice(n_states, p=weights / total))
+        else:
+            dead_ends += 1
+            if dead_ends <= budget and k > 3:
+                # Recoil. Escalate only while stuck at the same place.
+                if k <= frontier:
+                    retreat = min(retreat * 2, 64)
+                else:
+                    frontier, retreat = k, 2
+                back = min(retreat, k - 3)
+                del pos[-back:]
+                del states[-back:]
+                grid.remove_last(back)
+                out.n_backtracks += 1
+                continue
+            if not force:
+                return abandon()
+            s = int(np.argmax(clear))
+            out.n_forced += 1
 
-        s = int(rng.choice(n_states, p=weights / total))
-        pos.append(cands[s])
+        put(cands[s], k)
         states.append(s)
 
-    return np.asarray(pos), n_overlap, n_spear, np.asarray(states, dtype=int)
+    out.positions = np.asarray(pos)
+    out.states = np.asarray(states, dtype=int)
+    return out

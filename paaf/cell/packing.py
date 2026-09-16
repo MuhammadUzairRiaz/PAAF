@@ -268,6 +268,20 @@ class NeighbourGrid:
             slots.append(i)
         return slots
 
+    def remove_last(self, count: int) -> None:
+        """Remove the ``count`` most recently added atoms.
+
+        Chain growth adds a chain's beads as it places them and has to take
+        them back when it backtracks out of a dead end. Those beads are always
+        the newest slots, so each is also the last entry of its own bucket and
+        removal is O(1) per atom — no search, no reindexing.
+        """
+        count = min(int(count), self._n)
+        for slot in range(self._n - 1, self._n - count - 1, -1):
+            bucket = self._cells[self._key(self._pos[slot])]
+            bucket.pop()
+        self._n -= count
+
     def positions(self, slots: Sequence[int]) -> np.ndarray:
         return self._pos[np.asarray(slots, dtype=np.int64)]
 
@@ -328,7 +342,8 @@ class NeighbourGrid:
 
     def soft_energy(self, point: np.ndarray, radius: float,
                     exclude_slots: Optional[set] = None,
-                    epsilon: float = 0.2) -> float:
+                    epsilon: float = 0.2,
+                    exclude_mol: Optional[int] = None) -> float:
         """A cheap repulsive non-bonded energy at ``point`` (kcal/mol).
 
         Theodorou–Suter weight each candidate torsion by
@@ -351,6 +366,10 @@ class NeighbourGrid:
         cand = self._candidates(point)
         if cand is None:
             return 0.0
+        if exclude_mol is not None:
+            cand = cand[self._mol[cand] != exclude_mol]
+            if cand.size == 0:
+                return 0.0
         if exclude_slots:
             cand = np.asarray([c for c in cand if int(c) not in exclude_slots],
                               dtype=np.int64)

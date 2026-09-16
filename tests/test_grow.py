@@ -224,58 +224,49 @@ def test_atom_order_still_follows_the_spec_order():
     assert set(names[pe_beads:]) == {"PS"}
 
 
-def test_failure_message_says_how_far_it_got_and_what_binds():
-    """A bare 'too dense' is useless when 27 of 30 chains went in."""
+def test_a_tolerance_the_density_cannot_honour_still_builds_clean():
+    """A tight guard in a dense box used to abort the build.
+
+    4 x DP 60 at 1.30 g/cm3 with a 2.4 Å tolerance: growth runs out of free
+    states on some steps, forces them, and relief then clears every contact —
+    so the cell comes back clean, with the forcing reported, not hidden.
+    """
     spec = _pe(4, 60)
     box = _box_for_density(4 * 60 * PE_MASS, 1.30)
-    with pytest.raises(PackFailed) as exc:
-        grow_amorphous_cell([spec], box, temperature=413.0, seed=2,
-                            tolerance=2.4, max_restarts=3)
-    msg = str(exc.value)
-    print("\n  " + msg.replace("\n", "\n  "))
-    assert "of 4 chains were placed" in msg
-    assert "LOWER the overlap tolerance" in msg
-    assert "2.40" in msg
+    res = grow_amorphous_cell([spec], box, temperature=413.0, seed=2,
+                              tolerance=2.4)
+    dmin = _min_nonbonded_distance(res, exclude_topological=3)
+    print(f"\n  forced {res.n_forced}, backtracked {res.n_backtracks}, "
+          f"contacts {res.n_contacts}, closest {dmin:.3f} Å")
+    assert len(res.chains) == 4
+    assert res.n_contacts == 0
+    assert dmin >= 2.4 * (1 - 1e-3)
+    if res.n_forced:
+        assert any("least-crowded" in n for n in res.notes)
 
 
 # ------------------------------------------------------- 7. scanning helps
-def test_scanning_beats_attrition_on_long_chains():
-    """Depth 2 must build cells that depth 0 cannot.
+def test_scanning_reduces_dead_ends_on_long_chains():
+    """Look-ahead still does its job: fewer dead ends to recover from.
 
-    Scanning fixes *attrition* — growing into a dead end and losing the whole
-    chain — so the effect only appears where dead ends are common. At modest
-    density and DP both depths succeed and the comparison says nothing; the
-    discriminating regime is long chains in a tight box.
-
-    The regime had to be re-found when growth moved to skeletal-atom
-    granularity: DP 40 is now 80 beads, so the old DP-150 setting became
-    impossible for both depths and the test would have compared two failures.
-    Measured separation now (4 chains, DP 40, 1.10 g/cm³, 3 seeds):
-    depth 0 built 2/3 with 23 restarts, depth 2 built 3/3 with 3.
+    Both depths now always build — dead ends are backtracked — so the
+    discriminating measure is how many dead ends had to be recovered.
+    Measured (4 chains, DP 40, 1.10 g/cm³, 3 seeds): 19 backtracks+restarts
+    at depth 0, 8 at depth 2.
     """
     n, dp, dens = 4, 40, 1.10
     box = _box_for_density(n * dp * PE_MASS, dens)
-    result = {}
-    print(f"\n  {n} chains x DP {dp} at {dens} g/cm³ (box {box.a:.1f} Å), 3 seeds")
+    recovered = {}
     for depth in (0, 2):
-        ok, restarts = 0, 0
+        total = 0
         for seed in (1, 2, 3):
-            spec = _pe(n, dp)
-            try:
-                r = grow_amorphous_cell([spec], box, temperature=413.0,
-                                        scan_depth=depth, seed=seed,
-                                        max_restarts=8)
-                ok += 1
-                restarts += r.n_restarts
-            except PackFailed:
-                restarts += 8
-        result[depth] = (ok, restarts)
-        print(f"    scan_depth {depth}: {ok}/3 cells built, {restarts} restarts")
-
-    assert result[2][0] > result[0][0], (
-        f"scanning did not improve the success rate: "
-        f"depth0={result[0]}, depth2={result[2]}")
-    assert result[2][1] < result[0][1]
+            r = grow_amorphous_cell([_pe(n, dp)], box, temperature=413.0,
+                                    scan_depth=depth, seed=seed)
+            assert len(r.chains) == n
+            total += r.n_backtracks + r.n_restarts
+        recovered[depth] = total
+        print(f"\n    scan_depth {depth}: {total} dead ends recovered")
+    assert recovered[2] < recovered[0]
 
 
 def test_scanning_is_off_by_default_and_says_why_when_on():
@@ -388,25 +379,110 @@ def test_two_species_in_one_cell():
 
 
 # ------------------------------------------------------------ failure mode
-def test_impossible_density_fails_with_actionable_advice():
-    """A hopeless box must still name what to change.
+def test_impossible_density_still_returns_and_says_so():
+    """A hopeless box returns a cell with its contacts counted, not an error.
 
-    At the default tolerance the binding constraint is the density itself,
-    not the hard-core guard, and the advice has to say so — pointing at the
-    tolerance here would send the user to tighten a knob that is already
-    loose.
+    4 x DP 60 in a 12 Å box is 6.5 g/cm³ — past random close packing for
+    the bead size, so the tolerance cannot be honoured anywhere. The build
+    must still finish, keep the chain geometry exact, and say plainly that the
+    result is not clean.
     """
+    from paaf.cell.ris import RIS_LIBRARY
     spec = _pe(4, 60)
     box = BoxShape(shape="cubic", a=12.0)          # far too small
-    with pytest.raises(PackFailed) as exc:
-        grow_amorphous_cell([spec], box, seed=1, max_restarts=3)
-    msg = str(exc.value)
-    print(f"\n  message: {msg[:200]}...")
-    assert "0 of 4 chains were placed" in msg
-    assert "Lower the target density" in msg
-    assert "look-ahead depth" in msg
-    # The tolerance is already at the default, so it must NOT be blamed.
-    assert "LOWER the overlap tolerance" not in msg
+    res = grow_amorphous_cell([spec], box, seed=1)
+    print(f"\n  contacts {res.n_contacts}, closest "
+          f"{res.min_nonbonded_distance:.2f} Å, forced {res.n_forced}")
+    assert len(res.chains) == 4
+    assert res.n_contacts > 0
+    assert any("do not fit" in n for n in res.notes)
+    lengths = _bond_lengths(res)
+    assert abs(lengths - RIS_LIBRARY["PE"].bond_length_a).max() < 1e-4
+
+
+def _bond_lengths(res) -> np.ndarray:
+    pos = np.array([a.xyz for a in res.molecule.atoms])
+    dims = np.array(res.box.bounding_box())
+    out, start = [], 0
+    for c in res.chains:
+        d = np.diff(pos[start:start + c.n_beads], axis=0)
+        d -= dims * np.round(d / dims)
+        out.extend(np.linalg.norm(d, axis=1))
+        start += c.n_beads
+    return np.asarray(out)
+
+
+# ----------------------------------------------- never fails, stays clean
+def test_the_reported_failure_case_now_builds_clean():
+    """Regression: 50 x DP 100 PE at 0.76 g/cm³ failed on chain 39-45.
+
+    Chains that dead-ended were thrown away whole; after 20 throwaways the
+    build aborted. With recoil it completes without forcing anything.
+    """
+    from paaf.cell.ris import RIS_LIBRARY
+    spec = _pe(50, 100)
+    box = _box_for_density(50 * 100 * PE_MASS, 0.76)
+    res = grow_amorphous_cell([spec], box, temperature=413.0, seed=12345)
+    print(f"\n  {res.summary().splitlines()[4]}")
+    print(f"  {res.summary().splitlines()[5]}")
+    assert len(res.chains) == 50
+    assert res.n_forced == 0 and res.n_contacts == 0
+    assert res.min_nonbonded_distance >= 1.7 - 1e-9
+    lengths = _bond_lengths(res)
+    assert abs(lengths - RIS_LIBRARY["PE"].bond_length_a).max() < 1e-9
+
+
+def test_forced_steps_are_relieved_with_exact_geometry():
+    """At 3.0 g/cm³ steps are forced; relief must leave no contacts AND the
+    bond lengths and angles the back-mapper relies on."""
+    from paaf.cell.ris import RIS_LIBRARY
+    m = RIS_LIBRARY["PE"]
+    spec = _pe(4, 60)
+    box = _box_for_density(4 * 60 * PE_MASS, 3.0)
+    res = grow_amorphous_cell([spec], box, temperature=413.0, seed=3)
+    dmin = _min_nonbonded_distance(res, exclude_topological=3)
+    lengths = _bond_lengths(res)
+    print(f"\n  forced {res.n_forced}, contacts {res.n_contacts}, closest "
+          f"{dmin:.3f} Å, bond error {abs(lengths - m.bond_length_a).max():.1e}")
+    assert res.n_forced > 0, "this regime is meant to exercise relief"
+    assert res.n_contacts == 0
+    assert dmin >= 1.7 * (1 - 1e-3)
+    assert abs(lengths - m.bond_length_a).max() < 1e-4
+
+
+def test_backtracking_does_not_bias_chain_dimensions():
+    """Recoil must not buy success with compact chains.
+
+    Compared against a melt where plain growth never dead-ends
+    (2 x DP 40 at 0.10 g/cm³), the dense cell's C_n stays within the same
+    +-50% band the unbiased test uses. Measured before/after recoil over
+    8 seeds, 10 x DP 50 at 0.85: 5.19 +- 0.45 old, 5.06 +- 0.43 new.
+    """
+    cns = []
+    for seed in (1, 2, 3, 4):
+        r = grow_amorphous_cell([_pe(10, 50)],
+                                _box_for_density(10 * 50 * PE_MASS, 0.85),
+                                temperature=413.0, seed=seed)
+        cns += [c.c_n for c in r.chains]
+    mean = float(np.mean(cns))
+    print(f"\n  C_n over 40 chains: {mean:.2f}")
+    assert 4.3 < mean < 6.0
+
+
+def test_grid_remove_last_undoes_add():
+    from paaf.cell.packing import NeighbourGrid
+    grid = NeighbourGrid(np.array([20.0, 20.0, 20.0]), 4.0)
+    grid.add(np.array([[1.0, 1.0, 1.0]]), np.array([1.0]), mol_id=0)
+    before = {k: list(v) for k, v in grid._cells.items()}
+    grid.add(np.array([[1.5, 1.0, 1.0], [10.0, 10.0, 10.0]]),
+             np.array([1.0, 1.0]), mol_id=1)
+    assert grid.overlaps(np.array([[10.2, 10.0, 10.0]]), np.array([1.0]),
+                         1.0, 0.5)
+    grid.remove_last(2)
+    assert grid.n_atoms == 1
+    assert {k: v for k, v in grid._cells.items() if v} == before
+    assert not grid.overlaps(np.array([[10.2, 10.0, 10.0]]), np.array([1.0]),
+                             1.0, 0.5)
 
 
 def test_generic_ris_is_flagged_in_the_result():
