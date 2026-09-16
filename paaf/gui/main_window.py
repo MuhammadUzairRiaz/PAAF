@@ -178,6 +178,7 @@ class MainWindow(QMainWindow):
         self._build_menu()
         self._build_central()
         self._wire_logging()
+        self._setup_updater()
 
     # --------------------------------------------------------- menu
     def _build_menu(self) -> None:
@@ -204,6 +205,13 @@ class MainWindow(QMainWindow):
         m_tools.addAction(a)
 
         m_help = mb.addMenu("&Help")
+        a = QAction("Check for updates…", self)
+        a.triggered.connect(self._updater_check_now); m_help.addAction(a)
+        self._act_restore_version = QAction("Restore previous version", self)
+        self._act_restore_version.triggered.connect(self._updater_restore_previous)
+        m_help.addAction(self._act_restore_version)
+        m_help.aboutToShow.connect(self._updater_sync_menu)
+        m_help.addSeparator()
         a = QAction("About...", self); a.triggered.connect(self._about); m_help.addAction(a)
 
     # --------------------------------------------------------- central
@@ -2138,6 +2146,431 @@ class MainWindow(QMainWindow):
             self._on_stage(msg)
         self.console.appendPlainText(msg)
         self.console.verticalScrollBar().setValue(self.console.verticalScrollBar().maximum())
+
+    # ================================================== self-updater
+    # All git / pip work lives in paaf.updater and runs on a background
+    # thread. Every slot here is wrapped: nothing about updating may raise
+    # into the GUI or stop the current version from running.
+    _SESSION_KEY = "updater/session"
+    _SMILES_PANELS = ("panel_solo", "panel_a", "panel_b")
+
+    def _setup_updater(self) -> None:
+        self._update_task = None          # QThread of the running check/apply
+        self._update_threads = []         # every updater QThread, never "a job"
+        self._update_applying = False
+        self._update_info = None
+        try:
+            from PyQt5.QtCore import QSettings, QTimer
+            from .. import updater
+
+            def _get(key):
+                return QSettings("PAAF", "PAAF").value(key, "", type=str)
+
+            def _set(key, value):
+                s = QSettings("PAAF", "PAAF")
+                s.setValue(key, value or "")
+                s.sync()
+
+            updater.set_settings_backend(_get, _set)
+            self._build_update_banner()
+            self._updater_restore_session()
+
+            # Timer so the window is on screen before the check starts.
+            # Not under pytest or when switched off, so tests never fetch.
+            import os
+            if not (os.environ.get("PYTEST_CURRENT_TEST")
+                    or os.environ.get("PAAF_NO_UPDATE_CHECK")):
+                QTimer.singleShot(1500, lambda: self._updater_check(manual=False))
+        except Exception as exc:
+            log.debug("updater setup failed", exc_info=True)
+            self._append_log(f"[update] updater unavailable: {exc}")
+
+    def _build_update_banner(self) -> None:
+        from PyQt5.QtCore import QTimer
+        from PyQt5.QtWidgets import QFrame
+
+        bar = QFrame(); bar.setObjectName("update_banner")
+        bar.setStyleSheet(
+            f"QFrame#update_banner {{ background: {T.PRIMARY_TINT};"
+            f" border-bottom: 1px solid {T.PRIMARY_BORDER}; }}"
+            f"QFrame#update_banner QLabel {{ color: {T.TEXT}; }}")
+        row = QHBoxLayout(bar); row.setContentsMargins(12, 6, 12, 6)
+        self._update_label = QLabel("")
+        self._update_label.setWordWrap(True)
+        self._update_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        row.addWidget(self._update_label, 1)
+        self._btn_update_now = QPushButton("Update now")
+        self._btn_update_later = QPushButton("Later")
+        self._btn_update_skip = QPushButton("Skip this version")
+        self._btn_update_now.clicked.connect(self._updater_update_now)
+        self._btn_update_later.clicked.connect(self._updater_hide_banner)
+        self._btn_update_skip.clicked.connect(self._updater_skip)
+        for b in (self._btn_update_now, self._btn_update_later,
+                  self._btn_update_skip):
+            row.addWidget(b)
+        bar.hide()
+        self._update_banner = bar
+
+        # Put the banner above the existing central splitter.
+        central = self.takeCentralWidget()
+        holder = QWidget(); lay = QVBoxLayout(holder)
+        lay.setContentsMargins(0, 0, 0, 0); lay.setSpacing(0)
+        lay.addWidget(bar)
+        lay.addWidget(central, 1)
+        self.setCentralWidget(holder)
+
+        # Keeps "Update now" disabled while any job is running.
+        self._update_busy_timer = QTimer(self)
+        self._update_busy_timer.setInterval(1000)
+        self._update_busy_timer.timeout.connect(self._updater_sync_buttons)
+
+    # ---- banner states
+    def _updater_show_available(self, info) -> None:
+        n = len(info.commits)
+        self._update_label.setText(
+            f"PAAF update available ({n} new commit{'s' if n != 1 else ''})")
+        subjects = [c.split(" ", 1)[-1] for c in info.commits[:25]]
+        if n > 25:
+            subjects.append(f"… and {n - 25} more")
+        self._update_label.setToolTip("\n".join(subjects))
+        self._btn_update_now.show(); self._btn_update_skip.show()
+        self._btn_update_later.setText("Later")
+        self._btn_update_later.setEnabled(True)
+        self._update_banner.show()
+        self._updater_sync_buttons()
+        self._update_busy_timer.start()
+
+    def _updater_show_message(self, text: str) -> None:
+        self._update_label.setText(text)
+        self._update_label.setToolTip("")
+        self._btn_update_now.hide(); self._btn_update_skip.hide()
+        self._btn_update_later.setText("Close")
+        self._btn_update_later.setEnabled(not self._update_applying)
+        self._update_banner.show()
+        self._update_busy_timer.stop()
+
+    def _updater_hide_banner(self) -> None:
+        try:
+            self._update_banner.hide()
+            self._update_busy_timer.stop()
+        except Exception:
+            log.debug("updater: hide banner failed", exc_info=True)
+
+    def _updater_other_job_running(self) -> bool:
+        """True while a pipeline or any tab's worker thread is running."""
+        mine = self._update_threads
+        try:
+            return any(t.isRunning() for t in self.findChildren(QThread)
+                       if not any(t is m for m in mine))
+        except Exception:
+            return bool(self._thread is not None and self._thread.isRunning())
+
+    def _updater_sync_buttons(self) -> None:
+        try:
+            busy = self._updater_other_job_running()
+            working = self._update_task is not None
+            self._btn_update_now.setEnabled(not busy and not working)
+            self._btn_update_skip.setEnabled(not working)
+            self._btn_update_now.setToolTip(
+                "Wait for the running job to finish (or cancel it) first."
+                if busy else "Download and install the new version, then restart PAAF.")
+        except Exception:
+            log.debug("updater: sync buttons failed", exc_info=True)
+
+    def _updater_sync_menu(self) -> None:
+        try:
+            from .. import updater
+            self._act_restore_version.setEnabled(
+                bool(updater.last_good_commit()) and self._update_task is None)
+        except Exception:
+            self._act_restore_version.setEnabled(False)
+
+    def _updater_log(self, line: str) -> None:
+        try:
+            self._append_log(f"[update] {line}")
+        except Exception:
+            log.debug("updater: log failed", exc_info=True)
+
+    # ---- background runs
+    def _updater_run(self, fn, on_done) -> bool:
+        """Run ``fn(progress)`` off the GUI thread; one updater job at a time."""
+        if self._update_task is not None:
+            self._updater_show_message("An update step is already running…")
+            return False
+        from .background import run_in_background
+
+        def done(result):
+            self._update_task = None
+            try:
+                on_done(result)
+            except Exception as exc:
+                log.debug("updater: result handler failed", exc_info=True)
+                self._updater_finish_failure(f"Update step failed: {exc}")
+
+        def fail(err):
+            self._update_task = None
+            self._updater_finish_failure(
+                "Update step failed: " + err.strip().splitlines()[0])
+            self._updater_log(err)
+
+        self._update_task = run_in_background(
+            self, fn, on_done=done, on_fail=fail,
+            on_progress=self._updater_log)
+        self._update_threads.append(self._update_task)
+        self._update_task.finished.connect(self._updater_forget_threads)
+        self._updater_sync_buttons()
+        return True
+
+    def _updater_forget_threads(self) -> None:
+        self._update_threads = [t for t in self._update_threads
+                                if t is self._update_task or t.isRunning()]
+
+    def _updater_finish_failure(self, message: str) -> None:
+        self._update_applying = False
+        self._updater_clear_session()
+        self._updater_log(message)
+        self._updater_show_message(message)
+        self.statusBar().showMessage("Update not applied — PAAF is unchanged", 8000)
+
+    # ---- check
+    def _updater_check_now(self) -> None:
+        self._updater_check(manual=True)
+
+    def _updater_check(self, manual: bool) -> None:
+        try:
+            from .. import updater
+            if manual:
+                self._updater_show_message("Checking for updates…")
+            self._updater_run(lambda _p: updater.check_for_update(),
+                              lambda info: self._updater_on_checked(info, manual))
+        except Exception as exc:
+            log.debug("updater: check failed", exc_info=True)
+            self._updater_log(f"update check failed: {exc}")
+
+    def _updater_on_checked(self, info, manual: bool) -> None:
+        from .. import updater
+        self._update_info = info
+        if info.error:
+            # Offline at startup is normal: log it, do not nag.
+            self._updater_log(info.error)
+            if manual:
+                self._updater_show_message(info.error)
+            return
+        if info.available and (manual or updater.should_offer(info)):
+            self._updater_log(f"update available: {len(info.commits)} new "
+                              f"commit(s), {info.local[:10]} → {info.remote[:10]}")
+            self._updater_show_available(info)
+        elif manual:
+            self._updater_show_message(f"PAAF is up to date ({info.local[:10]}).")
+
+    def _updater_skip(self) -> None:
+        try:
+            from .. import updater
+            if self._update_info is not None and self._update_info.remote:
+                updater.skip_commit(self._update_info.remote)
+                self._updater_log(
+                    f"skipping version {self._update_info.remote[:10]}")
+        except Exception:
+            log.debug("updater: skip failed", exc_info=True)
+        self._updater_hide_banner()
+
+    # ---- apply
+    def _updater_update_now(self) -> None:
+        try:
+            from .. import updater
+            if self._updater_other_job_running():
+                self._updater_sync_buttons()
+                self.statusBar().showMessage(
+                    "Finish or cancel the running job before updating.", 6000)
+                return
+            self._updater_run(lambda _p: updater.can_update(),
+                              self._updater_on_can_update)
+        except Exception as exc:
+            log.debug("updater: update now failed", exc_info=True)
+            self._updater_finish_failure(f"Update not applied: {exc}")
+
+    def _updater_on_can_update(self, verdict) -> None:
+        from .. import updater
+        ok, reason = verdict
+        if not ok:
+            self._updater_log(reason)
+            self._updater_show_message(reason)
+            return
+        if self._updater_other_job_running():
+            self._updater_show_available(self._update_info)
+            return
+        self._updater_save_session()
+        self._update_applying = True
+        self._updater_show_message("Updating PAAF… progress is in the log panel.")
+        self._btn_update_later.setEnabled(False)
+        self._updater_run(lambda progress: updater.apply_update(progress),
+                          self._updater_on_applied)
+
+    def _updater_on_applied(self, result) -> None:
+        self._update_applying = False
+        if not result.success:
+            self._updater_finish_failure(result.message)
+            return
+        if not result.new or result.new == result.old:
+            self._updater_clear_session()
+            self._updater_show_message(result.message)
+            return
+        self._updater_restart(f"Updated to {result.new[:10]}. Restarting…")
+
+    # ---- restore previous version
+    def _updater_restore_previous(self) -> None:
+        try:
+            from .. import updater
+            target = updater.last_good_commit()
+            if not target:
+                self._updater_show_message("There is no previous version to restore.")
+                return
+            if self._updater_other_job_running():
+                QMessageBox.information(
+                    self, "Restore previous version",
+                    "Finish or cancel the running job first.")
+                return
+            answer = QMessageBox.question(
+                self, "Restore previous version",
+                f"Go back to PAAF version {target[:10]} and restart?\n\n"
+                "Your current settings are kept.",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if answer != QMessageBox.Yes:
+                return
+            self._updater_save_session()
+            self._update_applying = True
+            self._updater_show_message(f"Restoring version {target[:10]}…")
+            self._updater_run(lambda _p: updater.rollback(target),
+                              self._updater_on_restored)
+        except Exception as exc:
+            log.debug("updater: restore failed", exc_info=True)
+            self._updater_finish_failure(f"Could not restore the previous version: {exc}")
+
+    def _updater_on_restored(self, result) -> None:
+        self._update_applying = False
+        if not result.success:
+            self._updater_finish_failure(result.message)
+            return
+        self._updater_restart(f"{result.message} Restarting…")
+
+    def _updater_restart(self, message: str) -> None:
+        from PyQt5.QtCore import QSettings, QTimer
+        from .. import updater
+        self._updater_log(message)
+        self._updater_show_message(message)
+        self._btn_update_later.setEnabled(False)
+        try:
+            QSettings("PAAF", "PAAF").sync()
+        except Exception:
+            log.debug("updater: settings sync failed", exc_info=True)
+
+        def _go():
+            # Only returns if the restart could not happen.
+            err = updater.relaunch()
+            self._updater_clear_session()
+            self._updater_log(err)
+            self._updater_show_message(err)
+            self._btn_update_later.setEnabled(True)
+        # Let the banner paint before the process is replaced.
+        QTimer.singleShot(600, _go)
+
+    # ---- session state carried across the restart
+    def _updater_save_session(self) -> None:
+        import json
+        from PyQt5.QtCore import QSettings
+        state = {}
+        try:
+            state["config"] = asdict(self._build_config())
+        except Exception:
+            log.debug("updater: full config not saved", exc_info=True)
+        for key, read in (
+            ("smiles", lambda: {name: getattr(self.builder_tab, name).smiles_edit.text()
+                                for name in self._SMILES_PANELS
+                                if hasattr(self.builder_tab, name)}),
+            ("ff_key", lambda: self.ff_combo.currentData()),
+            ("output_dir", lambda: self.output_dir.text()),
+            ("box", lambda: [self.box_a.value(), self.box_b.value(),
+                             self.box_c.value()]),
+            ("page", lambda: self.sidebar.currentRow()),
+        ):
+            try:
+                state[key] = read()
+            except Exception:
+                log.debug("updater: %s not saved", key, exc_info=True)
+        try:
+            s = QSettings("PAAF", "PAAF")
+            s.setValue(self._SESSION_KEY, json.dumps(state))
+            s.sync()
+        except Exception:
+            log.debug("updater: session not saved", exc_info=True)
+
+    def _updater_clear_session(self) -> None:
+        try:
+            from PyQt5.QtCore import QSettings
+            s = QSettings("PAAF", "PAAF")
+            s.remove(self._SESSION_KEY)
+            s.sync()
+        except Exception:
+            log.debug("updater: session not cleared", exc_info=True)
+
+    def _updater_restore_session(self) -> None:
+        import json
+        from PyQt5.QtCore import QSettings
+        raw = QSettings("PAAF", "PAAF").value(self._SESSION_KEY, "", type=str)
+        if not raw:
+            return
+        # Remove first: a state that breaks the new version must not be
+        # re-applied on every launch.
+        self._updater_clear_session()
+        try:
+            state = json.loads(raw)
+        except Exception:
+            return
+        restored_config = False
+        if state.get("config"):
+            try:
+                self._apply_config(Config.from_dict(state["config"]))
+                restored_config = True
+            except Exception:
+                log.debug("updater: config not restored", exc_info=True)
+        def _smiles(panels):
+            for name, text in panels.items():
+                if name in self._SMILES_PANELS and text:
+                    getattr(self.builder_tab, name).smiles_edit.setText(text)
+
+        steps = [("smiles", _smiles),
+                 ("page", lambda v: self.sidebar.setCurrentRow(int(v)))]
+        if not restored_config:
+            steps += [
+                ("output_dir", lambda v: self.output_dir.setText(v)),
+                ("ff_key", lambda v: self.ff_combo.setCurrentIndex(
+                    max(0, self.ff_combo.findData(v)))),
+                ("box", lambda v: [w.setValue(float(x)) for w, x in
+                                   zip((self.box_a, self.box_b, self.box_c), v)]),
+            ]
+        for key, apply in steps:
+            if state.get(key) not in (None, ""):
+                try:
+                    apply(state[key])
+                except Exception:
+                    log.debug("updater: %s not restored", key, exc_info=True)
+        self._updater_log("restored your settings from before the restart")
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt naming
+        if getattr(self, "_update_applying", False):
+            # Quitting between 'git pull' and the import check could leave
+            # an unverified version installed.
+            self.statusBar().showMessage(
+                "PAAF is updating — please wait for it to finish.", 6000)
+            event.ignore()
+            return
+        task = getattr(self, "_update_task", None)
+        if task is not None:
+            try:
+                task.wait(15000)      # an update check: at most the fetch timeout
+            except Exception:
+                log.debug("updater: wait on close failed", exc_info=True)
+        super().closeEvent(event)
 
     def _about(self) -> None:
         QMessageBox.information(

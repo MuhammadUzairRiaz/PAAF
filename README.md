@@ -215,6 +215,21 @@ cd PAAF
 python run_paaf.py
 ```
 
+### 1.5 Updating
+
+PAAF checks GitHub for a newer version at startup and, if there is one, shows
+a banner with **Update now**, **Later** and **Skip this version**. Updating
+pulls with `git pull --ff-only`, reinstalls dependencies (`pip install -e .`)
+only if `requirements.txt` / `setup.py` / `pyproject.toml` changed, checks that
+the new version imports, and restarts PAAF with your settings kept. If any step
+fails, PAAF goes back to the version you had and keeps running.
+**Help → Check for updates…** runs the same check on demand, and
+**Help → Restore previous version** returns to the version before the last
+update. Each step is recorded in `paaf_update.log` in the PAAF folder.
+Local edits to tracked files in the PAAF folder block the updater until you
+commit or stash them (`git stash`). If you installed PAAF from a zip, there is
+no git history to update from; install with `git clone` instead to get updates.
+
 ---
 
 ## 2. Paths to set inside the tool (first run)
