@@ -333,65 +333,44 @@ def test_export_reports_when_typing_did_not_happen(tmp_path):
 def test_export_gromacs_format_delivers_gro_top_and_itps(tmp_path,
                                                          monkeypatch):
     """output_formats="both": the cell folder must end up with cell.data,
-    cell.in, cell.gro, cell.top and the .itp includes — DL_FIELD asked once
-    per format, same typing both times."""
+    cell.in, cell.gro, cell.top and the .itp it includes — DL_FIELD asked
+    once per format, same typing both times."""
     import paaf.cell.cell_export as ce
     from paaf.cell.cell_export import export_cell
+    from _fake_dlfield import FakeDLField
 
-    engines_asked = []
-
-    def fake_run(structure, work_dir, ff_key, dl_dir, emit,
-                 output_engine="lammps", box_ang=None, cancel=None):
-        engines_asked.append(output_engine)
-        assert box_ang is not None, "the box must be passed for BOTH engines"
-        out = Path(work_dir) / "dlf_output1"
-        out.mkdir(parents=True, exist_ok=True)
-        if output_engine == "gromacs":
-            (out / "gromacs.gro").write_text("cell\n0\n 9.2 9.2 9.2\n")
-            (out / "gromacs.top").write_text('#include "gromacs1.itp"\n')
-            (out / "gromacs1.itp").write_text("[ moleculetype ]\nXYZ 3\n")
-            return out / "gromacs.gro"
-        (out / "lammps1.data").write_text("2 atoms\n")
-        (out / "lammps.in").write_text("pair_style lj/cut 12.0\n"
-                                       "read_data lammps1.data\n")
-        return out / "lammps1.data"
-
-    monkeypatch.setattr(ce, "_run_dlfield", fake_run)
+    fake = FakeDLField()
+    monkeypatch.setattr(ce, "_run_dlfield", fake)
     res, specs = _cell(PE, 10, 2, 0.85, ris_key="PE")
     exp = export_cell(res, specs, tmp_path, name="pe",
                       ff_key="opls2005_dl", push_off=False,
                       output_formats="both")
+    engines_asked = [c["engine"] for c in fake.calls]
     print(f"\n  engines asked: {engines_asked}")
     print(f"  files: {sorted(p.name for p in exp.folder.iterdir())}")
+    print("\n  ".join(exp.messages))
     assert engines_asked == ["lammps", "gromacs"]
     assert exp.typed
     assert exp.typed_data is not None and exp.typed_data.exists()
     assert exp.typed_gro is not None and exp.typed_gro.exists()
     assert exp.typed_top is not None and exp.typed_top.exists()
-    assert (exp.folder / "gromacs1.itp").exists(), \
-        "the .top #includes gromacs1.itp; it must travel with it"
+    assert '#include "cell.itp"' in exp.typed_top.read_text()
+    assert (exp.folder / "cell.itp").exists(), \
+        "the .top #includes cell.itp; it must travel with it"
 
 
 def test_export_gromacs_only_needs_no_lammps_run(tmp_path, monkeypatch):
     import paaf.cell.cell_export as ce
     from paaf.cell.cell_export import export_cell
+    from _fake_dlfield import FakeDLField
 
-    engines_asked = []
-
-    def fake_run(structure, work_dir, ff_key, dl_dir, emit,
-                 output_engine="lammps", box_ang=None, cancel=None):
-        engines_asked.append(output_engine)
-        out = Path(work_dir) / "dlf_output1"
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "gromacs.gro").write_text("cell\n0\n 9.2 9.2 9.2\n")
-        (out / "gromacs.top").write_text("[ system ]\ncell\n")
-        return out / "gromacs.gro"
-
-    monkeypatch.setattr(ce, "_run_dlfield", fake_run)
+    fake = FakeDLField()
+    monkeypatch.setattr(ce, "_run_dlfield", fake)
     res, specs = _cell(PE, 10, 2, 0.85, ris_key="PE")
     exp = export_cell(res, specs, tmp_path, name="pe",
                       ff_key="opls2005_dl", push_off=False,
                       output_formats="gromacs")
+    engines_asked = [c["engine"] for c in fake.calls]
     print(f"\n  engines asked: {engines_asked}")
     assert engines_asked == ["gromacs"]
     assert exp.typed
@@ -399,3 +378,23 @@ def test_export_gromacs_only_needs_no_lammps_run(tmp_path, monkeypatch):
     assert exp.typed_gro.exists() and exp.typed_top.exists()
     assert not any("did not produce a .data" in m for m in exp.messages), \
         "a gromacs-only export must not complain about the missing .data"
+
+
+def test_export_types_a_cell_too_big_for_one_dlfield_run(tmp_path, monkeypatch):
+    """200 PE chains stopped DL_FIELD with 'too many C identified'. A cell
+    over DL_FIELD's limit must still come out typed, every chain of it."""
+    import paaf.cell.cell_export as ce
+    from paaf.cell.cell_export import export_cell
+    from _fake_dlfield import FakeDLField
+
+    res, specs = _cell(PE, 10, 6, 0.85, ris_key="PE")
+    fake = FakeDLField(max_atoms=100)        # the whole cell is ~370 atoms
+    monkeypatch.setattr(ce, "_run_dlfield", fake)
+    exp = export_cell(res, specs, tmp_path, name="pe",
+                      ff_key="opls2005_dl", push_off=False,
+                      output_formats="lammps")
+    print("\n  ".join(exp.messages))
+    assert exp.typed, exp.messages
+    assert all(c["n_atoms"] <= 100 for c in fake.calls)
+    text = exp.typed_data.read_text()
+    assert f"{exp.n_atoms} atoms" in text

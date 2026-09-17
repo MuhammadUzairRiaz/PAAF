@@ -75,7 +75,15 @@ def test_a_box_implies_a_periodic_cell(tmp_path, fake_dlfield, tiny_xyz):
 
 
 def test_both_export_call_sites_pass_the_real_box():
-    """Grep-level guard: neither exporter may call _run_dlfield boxless."""
+    """Grep-level guard: no exporter may call _run_dlfield boxless.
+
+    The amorphous cell is typed chain by chain; each DL_FIELD run there gets
+    the box of its own batch of spread-out chains.
+    """
+    from paaf.cell import chain_typing
+    ct_src = Path(chain_typing.__file__).read_text()
+    assert "box_ang=(box, box, box)" in ct_src, \
+        "chain typing must pass its batch box to DL_FIELD"
     src = Path(_run_dlfield.__code__.co_filename).read_text()
     calls = [l for l in src.splitlines()
              if "_run_dlfield(" in l and "def _run_dlfield" not in l]
@@ -84,7 +92,7 @@ def test_both_export_call_sites_pass_the_real_box():
     for n, l in enumerate(lines):
         if "_run_dlfield(" in l and "def " not in l:
             windows.append("\n".join(lines[n:n + 5]))
-    assert windows, "no call sites found?"
+    # Direct call sites left in cell_export (none today) must pass the box too.
     for w in windows:
         assert "box_ang=result.box.bounding_box()" in w, \
             f"a _run_dlfield call site does not pass the box:\n{w}"

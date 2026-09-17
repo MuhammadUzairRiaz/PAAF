@@ -592,6 +592,18 @@ def relax_cell_gromacs(molecule: Molecule, box_dims: Sequence[float],
                 shutil.copy2(src, work / src.name)
             except shutil.SameFileError:
                 pass
+    # The .top #includes its .itp by relative name; grompp stops on a
+    # missing include, so the includes must travel with it.
+    try:
+        import re as _re
+        top_src = Path(top_file)
+        for inc in _re.findall(r'^\s*#include\s+"([^"]+)"',
+                               top_src.read_text(errors="replace"), _re.M):
+            inc_src = top_src.parent / inc
+            if inc_src.is_file() and inc_src.parent != work:
+                shutil.copy2(inc_src, work / Path(inc).name)
+    except (OSError, shutil.SameFileError):
+        pass
     res.input_script = write_em_mdp(work, settings)
 
     gmx = find_gromacs(settings.gmx_exe)

@@ -742,16 +742,15 @@ def export_cell(
 
     if use_dlfield:
         exp.route = f"DL_FIELD ({ff.display_name})"
-        # XYZ, not mol2.
+        # Chain by chain, not the whole cell in one run.
         #
-        # The mol2 carries bond orders, which is why it was preferred — a
-        # typer that can read them does better. DL_FIELD cannot: handed the
-        # cell's .mol2 it stopped with "Can't locate any sensible information
-        # in config file" and wrote nothing. Every DL_FIELD run elsewhere in
-        # PAAF feeds it an .xyz, and those all work; DL_FIELD perceives its
-        # own bonds from geometry through DL_F Notation, so the bond orders
-        # were never doing anything for this route anyway.
-        src = exp.atomistic_xyz or exp.atomistic_mol2
+        # DL_FIELD has array limits compiled in: 200 PE chains (40,000
+        # aliphatic carbons) stopped it with "too many C identified" and no
+        # file was written. It also perceives bonds from distance, so a close
+        # inter-chain contact could be typed as a bond. Each distinct chain
+        # is typed once, on its own, and the result is copied onto every
+        # chain with the cell's coordinates. See paaf.cell.chain_typing.
+        from .chain_typing import ChainTypingError, type_cell_by_chain
         fmt = str(output_formats or "lammps").lower()
         want_lmp = fmt in ("lammps", "both")
         # GROMACS files are wanted either as a deliverable in their own
@@ -759,103 +758,44 @@ def export_cell(
         want_gmx = (fmt in ("gromacs", "both")
                     or (relax and getattr(relax_settings, "engine", "auto")
                         in ("gromacs", "auto")))
-        data = None
-        if want_lmp:
-            try:
-                data = _run_dlfield(src, folder / "_typing", ff_key,
-                                    Path(dl_field_dir) if dl_field_dir
-                                    else None,
-                                    emit, box_ang=result.box.bounding_box(),
-                                    cancel=cancel)
-            except Exception as exc:
-                from .packing import PackCancelled as _PC
-                if isinstance(exc, _PC):
-                    raise
-                exp.messages.append(f"DL_FIELD typing failed — {exc}")
-        if data is not None:
-            exp.typed_data = folder / "cell.data"
-            shutil.copy2(data, exp.typed_data)
-            exp.typed = True
-            # ...and the input deck that makes it runnable.
-            #
-            # cell.data carries masses, charges and topology but NOT the
-            # styles or the pair coefficients — those are in the lammps.in
-            # DL_FIELD wrote alongside it, down in _typing/dlf_output1/.
-            # Copying only the .data left the cell un-runnable and looked
-            # like the export had simply forgotten a file.
-            try:
-                src_in = _find_dlfield_styles_file(data.parent)
-                if src_in is not None:
-                    exp.typed_input = folder / "cell.in"
-                    shutil.copy2(src_in, exp.typed_input)
-                    # DL_FIELD's script reads its own file name; ours is
-                    # cell.data. Without this, `lmp -in cell.in` dies on
-                    # a missing lammps1.data.
-                    txt = exp.typed_input.read_text()
-                    exp.typed_input.write_text(txt.replace(
-                        f"read_data {data.name}", "read_data cell.data"))
-                    emit(f"  wrote {exp.typed_input.name} "
-                         f"(styles + pair coefficients)")
-                    for extra in sorted(data.parent.glob("*.in.*")):
-                        shutil.copy2(extra, folder / extra.name)
-                    if str(lammps_styles or "hybrid").lower() in (
-                            "non_hybrid", "nonhybrid", "both"):
-                        _write_nonhybrid(exp, folder, emit)
-                else:
-                    exp.messages.append(
-                        "DL_FIELD wrote no lammps.in, so cell.data has no "
-                        "styles or pair coefficients with it and cannot be "
-                        "run as-is.")
-            except Exception as exc:
-                exp.messages.append(f"LAMMPS input not copied — {exc}")
-        elif want_lmp:
-            exp.messages.append(
-                "DL_FIELD did not produce a .data file. Check that dl_field "
-                "is installed and the DL_FIELD lib directory is set.")
-        # GROMACS files come from DL_FIELD's *secondary*-output slot, which
-        # holds one engine at a time — so the same typing run is asked a
-        # second time with the gromacs engine. Identical methodology
-        # (DL_F Notation, same force field, same box), different format.
-        # This run goes AFTER the LAMMPS copy above so that whatever
-        # dl_field does to _typing/dlf_output1 cannot cost us cell.data.
-        if want_gmx:
-            gro = None
-            try:
-                gro = _run_dlfield(src, folder / "_typing", ff_key,
-                                   Path(dl_field_dir) if dl_field_dir
-                                   else None,
-                                   emit, output_engine="gromacs",
-                                   box_ang=result.box.bounding_box(),
-                                   cancel=cancel)
-            except Exception as exc:
-                from .packing import PackCancelled as _PC
-                if isinstance(exc, _PC):
-                    raise
-                exp.messages.append(
-                    f"DL_FIELD GROMACS output not produced ({exc})"
-                    + ("; the LAMMPS route is still available."
-                       if data is not None else "."))
-            if gro is not None:
-                exp.typed_gro = folder / "cell.gro"
-                shutil.copy2(gro, exp.typed_gro)
-                tops = sorted(gro.parent.glob("*.top"))
-                if tops:
-                    exp.typed_top = folder / "cell.top"
-                    shutil.copy2(tops[0], exp.typed_top)
-                # The .top #includes per-molecule .itp files by name; they
-                # must travel with it or grompp dies on a missing include.
-                for itp in sorted(gro.parent.glob("*.itp")):
-                    shutil.copy2(itp, folder / itp.name)
-                    exp.typed_itps.append(folder / itp.name)
+        engines = [e for e, on in (("lammps", want_lmp),
+                                   ("gromacs", want_gmx)) if on]
+        names = [getattr(c, "species", "") for c in getattr(result, "chains", [])]
+        if len(names) != len(bm.atoms_per_chain):
+            names = None
+        typing = None
+        try:
+            typing = type_cell_by_chain(
+                bm.molecule, bm.atoms_per_chain, dims, ff_key,
+                Path(dl_field_dir) if dl_field_dir else None,
+                folder / "_typing", folder, run_dlfield=_run_dlfield,
+                engines=engines, chain_names=names, emit=emit, cancel=cancel)
+        except ChainTypingError as exc:
+            exp.messages.append(f"DL_FIELD typing failed — {exc}")
+        except Exception as exc:
+            from .packing import PackCancelled as _PC
+            if isinstance(exc, _PC):
+                raise
+            exp.messages.append(f"DL_FIELD typing failed — {exc}")
+        if typing is not None:
+            exp.messages.extend(typing.messages)
+            if typing.data_file is not None:
+                exp.typed_data = typing.data_file
+                exp.typed_input = typing.input_file
                 exp.typed = True
-                emit(f"  wrote cell.gro"
-                     + (" + cell.top" if tops else "")
-                     + "".join(f" + {p.name}" for p in exp.typed_itps)
-                     + " for GROMACS")
-                if not tops:
-                    exp.messages.append(
-                        "DL_FIELD wrote a .gro but no .top; cell.gro has "
-                        "coordinates only and cannot be simulated alone.")
+                if str(lammps_styles or "hybrid").lower() in (
+                        "non_hybrid", "nonhybrid", "both"):
+                    _write_nonhybrid(exp, folder, emit)
+            if typing.gro_file is not None:
+                exp.typed_gro = typing.gro_file
+                exp.typed_top = typing.top_file
+                exp.typed_itps = list(typing.itp_files)
+                exp.typed = True
+            if typing.n_templates:
+                exp.messages.append(
+                    f"Typed chain by chain: {typing.n_templates} distinct "
+                    f"chain structure(s) typed by DL_FIELD and applied to "
+                    f"all {len(bm.atoms_per_chain)} chains.")
     else:
         exp.route = f"Moltemplate ({ff.display_name})"
         fmt = str(output_formats or "lammps").lower()
@@ -966,7 +906,9 @@ def export_cell(
     emit(f"  relaxing with {engine.upper()} …")
     try:
         if engine == "gromacs":
-            gro, top = _find_gromacs_inputs(folder / "_typing")
+            # The assembled cell files: _typing/ holds per-batch templates
+            # whose numbering does not match the cell.
+            gro, top = exp.typed_gro, exp.typed_top
             if gro is None or top is None:
                 exp.messages.append(
                     "GROMACS was requested but DL_FIELD produced no .gro/.top "
@@ -1002,7 +944,9 @@ def export_cell(
             if not init_f:
                 # DL_FIELD route: hunt for a companion input first, and only
                 # fall back to PAAF's table if there is none.
-                found = _find_dlfield_styles_file(folder / "_typing")
+                found = exp.typed_input if (
+                    exp.typed_input is not None
+                    and Path(exp.typed_input).is_file()) else None
                 parsed = {}
                 coeff_lines: List[str] = []
                 if found is not None:
