@@ -104,21 +104,55 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None,
     # Stage markers. The GUI parses "[stage k/N] label" to drive its
     # progress bar; everything else is plain log text.
     def _stage(k: int, label: str) -> None:
+        bench.phase(f"{k}. {label}")
         _p(f"[stage {k}/{_N_STAGES}] {label}")
 
+    from . import benchmark as bench
     from .run_log import run_log
     out_dir = Path(cfg.output_dir) / cfg.project_name
     with run_log(out_dir) as rl:
-        try:
-            result = _run_pipeline_body(cfg, _p, _stage, _check, cancel)
-        except PackCancelled as exc:
-            raise PipelineCancelled(str(exc)) from exc
+        with bench.benchmark("main_pipeline", out_dir,
+                             workload=_pipeline_workload(cfg),
+                             emit=progress) as b:
+            try:
+                result = _run_pipeline_body(cfg, _p, _stage, _check, cancel)
+            except PackCancelled as exc:
+                raise PipelineCancelled(str(exc)) from exc
+            b.metric(chains=int(cfg.box.n_chains),
+                     repeat_units=int(cfg.chain.n_monomers))
+            for f in (out_dir / "packed_box.data", result.get("data_file"),
+                      out_dir / "lammps.data", out_dir / "lammps1.data",
+                      out_dir / "system.data", out_dir / "packed_box.gro",
+                      out_dir / "system.gro"):
+                b.size_from(f)
+    result["benchmark_file"] = str(b.txt_file) if b.txt_file else None
     result["log_file"] = rl.get("log_file")
     result["energy_file"] = rl.get("energy_file")
     if rl.get("energy_file"):
         _p(f"Optimisation energies: {rl['energy_file']}")
     _p(f"Run log: {rl['log_file']}")
     return result
+
+
+def _pipeline_workload(cfg: Config) -> dict:
+    """The inputs that set a pipeline run's cost (hashed into workload_id)."""
+    box = cfg.box
+    return {
+        "monomers": [Path(m.file).name for m in cfg.monomers],
+        "repeat_units": cfg.chain.n_monomers,
+        "chain_mode": cfg.chain.mode,
+        "n_chains": box.n_chains,
+        "box": (f"{box.shape} {box.a:g}x{box.b:g}x{box.c:g}"
+                + (f" @ {box.density_g_cm3} g/cm3" if box.use_density else "")),
+        "force_field": cfg.force_field.key,
+        "engine": cfg.engine,
+        "lammps_styles": getattr(cfg, "lammps_styles", "hybrid"),
+        "optimizer": (f"{cfg.optimizer.ff} {cfg.optimizer.steps} steps"
+                      if cfg.optimizer.enabled else "off"),
+        "packmol": bool(box.packmol),
+        "blend_components": (len(cfg.blend.components)
+                             if cfg.blend.enabled else 0),
+    }
 
 
 def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
@@ -933,6 +967,8 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
             _p("[styles] lammps.in already uses plain styles — nothing to convert")
 
     _p(f"[stage done/{_N_STAGES}] Finished — files in {out_dir}")
+    from .benchmark import phase as _bench_phase
+    _bench_phase("Blend packing and charge checks")
 
     # ---- Optional: multi-component blend packing --------------------------
     blend_out = None

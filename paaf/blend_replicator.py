@@ -37,6 +37,8 @@ from .blend_styles import (
     strip_substyle_tokens,
     find_forcefield_input, merge_style_blocks, read_style_block,
 )
+from . import benchmark as bench
+from .benchmark import benchmarked
 from .logging_utils import get_logger
 
 log = get_logger(__name__)
@@ -405,6 +407,22 @@ def _replicate_component_topology(comp: BlendComponent, section: str,
 
 
 # ================================================================ top-level
+def _blend_after(rec, a, out) -> None:
+    rec.metric(chains=sum(int(c.count) for c in a["components"]))
+    rec.size_from(out)
+
+
+@benchmarked(
+    "blend",
+    folder=lambda a: Path(a["out_data_file"]).parent,
+    workload=lambda a: {
+        "components": ", ".join(f"{c.name} x{c.count} ({Path(c.data_file).name})"
+                                for c in a["components"]),
+        "box": "x".join(f"{float(x):g}" for x in a["box_edges"]),
+        "tolerance": a["tolerance"],
+        "minimise": bool(getattr(a["minimise"], "enabled", False)),
+        "regions": len(a["regions"] or [])},
+    after=_blend_after)
 def replicate_blend(
     components: List[BlendComponent],
     box_edges: Tuple[float, float, float],
@@ -430,6 +448,7 @@ def replicate_blend(
     """
     if not components:
         raise ValueError("At least one component required")
+    bench.phase("load components")
     _load_components(components)
     offsets = _cumulative_offsets(components)
     emit = progress or (lambda _m: None)
@@ -444,6 +463,7 @@ def replicate_blend(
     relaxed: Dict[int, list] = {}
     reports: List[str] = []
     if getattr(settings, "enabled", False):
+        bench.phase("minimise each component (LAMMPS)")
         emit("Relaxing each component before packing …")
         for i, comp in enumerate(components):
             rec, atoms = minimise_component(
@@ -460,6 +480,7 @@ def replicate_blend(
         log.info("blend: %s", line)
 
     # Build a PDB for each component and hand them all to packmol together.
+    bench.phase("pack chains (packmol)")
     pdb_files: List[Path] = []
     for i, comp in enumerate(components):
         pdb = work / f"comp_{i}_{comp.name}.pdb"
@@ -491,6 +512,7 @@ def replicate_blend(
             f"Blend coord count mismatch: consumed {idx} of {len(coords)}")
 
     # Build merged atom / topology / coefficient sections.
+    bench.phase("merge topology and validate")
     merged_atoms: List[str] = []
     merged_bonds: List[str] = []
     merged_angles: List[str] = []
@@ -594,6 +616,7 @@ def replicate_blend(
     total_dih_types     = sum(c.ntypes["dihedral"] for c in components)
     total_imp_types     = sum(c.ntypes["improper"] for c in components)
 
+    bench.phase("write LAMMPS files")
     a, b, c_ = box_edges
     out: List[str] = []
     out.append(f"LAMMPS blend of {len(components)} components — PAAF")

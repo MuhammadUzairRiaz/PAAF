@@ -290,6 +290,24 @@ that run) and, when the optimiser ran, `energies.txt` (initial / final
 OpenBabel energy of each minimisation) in `<output>/<project>/`, next to
 `dl_field.log` / `moltemplate.log`.
 
+### Benchmarks
+
+Every export — the main pipeline, Blend (LAMMPS and GROMACS), Layering, the
+CG builder, the Amorphous cell builder, reaction export and `pack-cell` —
+writes `benchmark.txt` and `benchmark.json` into its output folder, including
+failed and cancelled runs. Each report gives:
+
+- wall time, split into time spent in PAAF and time spent in each external
+  program (dl_field, moltemplate.sh, packmol, LAMMPS, gmx);
+- wall time per phase (for example: growth, back-mapping, push-off, typing);
+- CPU seconds for PAAF and its child programs, and peak memory;
+- atoms written and throughput (atoms/s);
+- the machine and library versions.
+
+Each run is also added as one row to `~/.paaf/benchmark_history.csv`
+(set `PAAF_BENCH_HISTORY` to use a different file). Two rows with the same
+`workload_id` had the same inputs, so their timings can be compared directly.
+
 ## 5. Troubleshooting
 
 | Symptom | Cause / fix |

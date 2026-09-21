@@ -4,6 +4,7 @@ scipy>=1.7
 networkx>=2.6
 pyyaml>=6.0
 PyQt5>=5.15
+psutil>=5.8        # optional: sampled peak memory in benchmark reports
 
 # Chemistry stack — install via conda-forge (pip wheels are unreliable
 # for these on many platforms):

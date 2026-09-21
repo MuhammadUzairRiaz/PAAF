@@ -285,8 +285,10 @@ def run_dlfield(
             returncode, stdout, stderr = rc, _out, _err
         proc = _P()
     else:
-        proc = subprocess.run(cmd, cwd=str(work_dir), capture_output=True,
-                              text=True)
+        from .benchmark import external
+        with external(cmd):
+            proc = subprocess.run(cmd, cwd=str(work_dir), capture_output=True,
+                                  text=True)
     log_text = (proc.stdout or "") + "\n" + (proc.stderr or "")
 
     # Save the full log next to polymer.control so users can inspect it after

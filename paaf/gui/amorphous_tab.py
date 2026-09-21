@@ -75,124 +75,18 @@ class _BuildWorker(QObject):
 
     @pyqtSlot()
     def run(self):
+        from ..benchmark import benchmark
         from ..cell.packing import PackCancelled
         try:
-            from ..cell.grow import grow_amorphous_cell
-            from ..cell.cell_export import export_cell
-
             o = self.options
-            specs = self.composition.grow_specs()
-
-            def on_progress(p):
-                msg = getattr(p, "message", "") or ""
-                self.progress.emit(msg)
-                frac = getattr(p, "fraction", None)
-                if frac is not None:
-                    self.fraction.emit(float(frac))
-
-            self.progress.emit(
-                f"growing {self.composition.total_chains} chains "
-                f"({self.composition.total_beads} skeletal beads) …")
-
-            # Grow, then CHECK FOR RING THREADING, and regrow on a fresh seed
-            # while any is found.
-            #
-            # Growth rejects spearing at bead level, where there are no rings
-            # yet; the rings only exist after back-mapping, so a bond through
-            # a phenyl shows up later — measured, its carbons sit at aromatic
-            # bond distance (1.41 A) from ring carbons, the typer bonds them,
-            # and the cell cannot be typed. No push-off can fix interlocked
-            # topology; a different seed can. The probe is a dress-only
-            # back-map (no push-off); it is silent but can take minutes on
-            # large cells.
-            attempts = 8 if o.get("do_export") else 1
-            result = None
-            best = None                       # (n_speared, grown result)
-            for attempt in range(attempts):
-                grown = grow_amorphous_cell(
-                    specs, self.composition.box(),
-                    temperature=o["temperature"],
-                    scan_depth=o["scan_depth"],
-                    tolerance=o["tolerance"],
-                    seed=o["seed"] + attempt,
-                    check_spearing=o["check_spearing"],
-                    progress=on_progress,
-                    cancel=self._cancel,
-                )
-                result = grown
-                if attempts == 1:
-                    break
-                try:
-                    import numpy as _np
-                    from ..cell.backmap import backmap_cell as _bm
-                    self.progress.emit(
-                        "checking the grown cell for ring threading "
-                        "(probe back-map — silent but busy; minutes on "
-                        "large cells) …")
-                    probe = _bm(grown, specs, tacticity=o["tacticity"],
-                                push_off=False)
-                    n_speared = getattr(probe, "n_speared", None)
-                    if n_speared is None:
-                        n_speared = 0 if any(
-                            "spearing check: none" in n
-                            for n in probe.notes) else 1
-                except Exception:
-                    break                      # probe failed: use this cell
-                if best is None or n_speared < best[0]:
-                    best = (n_speared, grown)
-                if n_speared == 0:
-                    if attempt:
-                        self.progress.emit(
-                            f"seed {o['seed'] + attempt}: no ring threading "
-                            f"({attempt} regrow(s) needed)")
-                    break
-                if attempt < attempts - 1:
-                    self.progress.emit(
-                        f"seed {o['seed'] + attempt}: {n_speared} bond(s) "
-                        f"thread a ring — regrowing with seed "
-                        f"{o['seed'] + attempt + 1}")
-                else:
-                    # Every seed threaded. Keep the LEAST-threaded cell, not
-                    # whichever happened to come last, and say so.
-                    result = best[1]
-                    self.progress.emit(
-                        f"all {attempts} seeds thread at least one ring; "
-                        f"keeping the best ({best[0]} threaded bond(s)). "
-                        f"Lower 'Build at' on the Composition step for a "
-                        f"clean cell.")
-            self.fraction.emit(1.0)
-
-            export = None
-            if o.get("do_export"):
-                self.progress.emit("exporting …")
-                rs = None
-                if o.get("relax"):
-                    from ..cell.relax import RelaxSettings
-                    rs = RelaxSettings(
-                        push_steps=o["push_steps"],
-                        maxiter=o["min_iter"],
-                        engine=o.get("engine", "auto"),
-                        lammps_exe=o["lammps_exe"],
-                        gmx_exe=o.get("gmx_exe", ""),
-                        mpi_ranks=o["mpi_ranks"])
-                def _emit_checked(msg: str) -> None:
-                    # A progress tick is also a cancellation point: raising
-                    # here aborts the export at the next stage boundary,
-                    # and the external LAMMPS/dl_field runs are killed
-                    # directly via the same token.
-                    if self._cancel.is_cancelled():
-                        raise PackCancelled("cancelled")
-                    self.progress.emit(msg)
-
-                export = export_cell(
-                    result, specs, o["out_dir"], name=o["name"],
-                    ff_key=o["ff_key"], dl_field_dir=o["dl_lib"] or None,
-                    atomistic=o["atomistic"], tacticity=o["tacticity"],
-                    run_typing=o["run_typing"], push_off=o["push_off"],
-                    relax=bool(o.get("relax")), relax_settings=rs,
-                    output_formats=o.get("output_formats", "lammps"),
-                    lammps_styles=o.get("lammps_styles", "hybrid"),
-                    progress=_emit_checked, cancel=self._cancel)
+            folder = (Path(o["out_dir"]) / o["name"]
+                      if o.get("do_export") and o.get("out_dir") else None)
+            with benchmark("amorphous_cell", folder,
+                           workload=self._bench_workload(),
+                           emit=self.progress.emit) as b:
+                b.metric(chains=getattr(self.composition, "total_chains", None),
+                         beads=getattr(self.composition, "total_beads", None))
+                result, export = self._build()
             self.finished.emit((result, export))
         except PackCancelled:
             # A deliberate cancel is not a failure and must not raise an
@@ -206,6 +100,151 @@ class _BuildWorker(QObject):
             # in the log, where it can be read if the failure is a real bug.
             self.progress.emit(traceback.format_exc())
             self.failed.emit(str(exc) or exc.__class__.__name__)
+
+    def _bench_workload(self) -> dict:
+        """The inputs that set the build's cost, for the benchmark report."""
+        try:
+            o, c = self.options, self.composition
+            return {
+                "components": ", ".join(
+                    f"{comp.name or comp.repeat_unit} "
+                    f"DP{comp.degree_of_polymerisation} x{n}"
+                    for comp, n in zip(c.components, c.chain_counts)),
+                "chains": c.total_chains, "beads": c.total_beads,
+                "box_edge_a": round(float(c.box_edge_a), 3),
+                "temperature": o.get("temperature"),
+                "scan_depth": o.get("scan_depth"),
+                "tolerance": o.get("tolerance"), "seed": o.get("seed"),
+                "check_spearing": o.get("check_spearing"),
+                "export": bool(o.get("do_export")),
+            }
+        except Exception:
+            return {}
+
+    def _build(self):
+        """Grow (with ring-threading regrows), then export if asked."""
+        from .. import benchmark as bench
+        from ..cell.packing import PackCancelled
+        from ..cell.grow import grow_amorphous_cell
+        from ..cell.cell_export import export_cell
+
+        o = self.options
+        specs = self.composition.grow_specs()
+
+        def on_progress(p):
+            msg = getattr(p, "message", "") or ""
+            self.progress.emit(msg)
+            frac = getattr(p, "fraction", None)
+            if frac is not None:
+                self.fraction.emit(float(frac))
+
+        self.progress.emit(
+            f"growing {self.composition.total_chains} chains "
+            f"({self.composition.total_beads} skeletal beads) …")
+
+        # Grow, then CHECK FOR RING THREADING, and regrow on a fresh seed
+        # while any is found.
+        #
+        # Growth rejects spearing at bead level, where there are no rings
+        # yet; the rings only exist after back-mapping, so a bond through
+        # a phenyl shows up later — measured, its carbons sit at aromatic
+        # bond distance (1.41 A) from ring carbons, the typer bonds them,
+        # and the cell cannot be typed. No push-off can fix interlocked
+        # topology; a different seed can. The probe is a dress-only
+        # back-map (no push-off); it is silent but can take minutes on
+        # large cells.
+        attempts = 8 if o.get("do_export") else 1
+        result = None
+        best = None                       # (n_speared, grown result)
+        for attempt in range(attempts):
+            bench.phase(f"grow chains (seed {o['seed'] + attempt})")
+            grown = grow_amorphous_cell(
+                specs, self.composition.box(),
+                temperature=o["temperature"],
+                scan_depth=o["scan_depth"],
+                tolerance=o["tolerance"],
+                seed=o["seed"] + attempt,
+                check_spearing=o["check_spearing"],
+                progress=on_progress,
+                cancel=self._cancel,
+            )
+            result = grown
+            if attempts == 1:
+                break
+            try:
+                import numpy as _np
+                from ..cell.backmap import backmap_cell as _bm
+                bench.phase("ring-threading probe (back-map)")
+                self.progress.emit(
+                    "checking the grown cell for ring threading "
+                    "(probe back-map — silent but busy; minutes on "
+                    "large cells) …")
+                probe = _bm(grown, specs, tacticity=o["tacticity"],
+                            push_off=False)
+                n_speared = getattr(probe, "n_speared", None)
+                if n_speared is None:
+                    n_speared = 0 if any(
+                        "spearing check: none" in n
+                        for n in probe.notes) else 1
+            except Exception:
+                break                      # probe failed: use this cell
+            if best is None or n_speared < best[0]:
+                best = (n_speared, grown)
+            if n_speared == 0:
+                if attempt:
+                    self.progress.emit(
+                        f"seed {o['seed'] + attempt}: no ring threading "
+                        f"({attempt} regrow(s) needed)")
+                break
+            if attempt < attempts - 1:
+                self.progress.emit(
+                    f"seed {o['seed'] + attempt}: {n_speared} bond(s) "
+                    f"thread a ring — regrowing with seed "
+                    f"{o['seed'] + attempt + 1}")
+            else:
+                # Every seed threaded. Keep the LEAST-threaded cell, not
+                # whichever happened to come last, and say so.
+                result = best[1]
+                self.progress.emit(
+                    f"all {attempts} seeds thread at least one ring; "
+                    f"keeping the best ({best[0]} threaded bond(s)). "
+                    f"Lower 'Build at' on the Composition step for a "
+                    f"clean cell.")
+        self.fraction.emit(1.0)
+
+        export = None
+        bench.end_phase()
+        if o.get("do_export"):
+            self.progress.emit("exporting …")
+            rs = None
+            if o.get("relax"):
+                from ..cell.relax import RelaxSettings
+                rs = RelaxSettings(
+                    push_steps=o["push_steps"],
+                    maxiter=o["min_iter"],
+                    engine=o.get("engine", "auto"),
+                    lammps_exe=o["lammps_exe"],
+                    gmx_exe=o.get("gmx_exe", ""),
+                    mpi_ranks=o["mpi_ranks"])
+            def _emit_checked(msg: str) -> None:
+                # A progress tick is also a cancellation point: raising
+                # here aborts the export at the next stage boundary,
+                # and the external LAMMPS/dl_field runs are killed
+                # directly via the same token.
+                if self._cancel.is_cancelled():
+                    raise PackCancelled("cancelled")
+                self.progress.emit(msg)
+
+            export = export_cell(
+                result, specs, o["out_dir"], name=o["name"],
+                ff_key=o["ff_key"], dl_field_dir=o["dl_lib"] or None,
+                atomistic=o["atomistic"], tacticity=o["tacticity"],
+                run_typing=o["run_typing"], push_off=o["push_off"],
+                relax=bool(o.get("relax")), relax_settings=rs,
+                output_formats=o.get("output_formats", "lammps"),
+                lammps_styles=o.get("lammps_styles", "hybrid"),
+                progress=_emit_checked, cancel=self._cancel)
+        return result, export
 
 
 # ============================================================ component row

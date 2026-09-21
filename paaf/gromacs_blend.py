@@ -32,6 +32,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from . import benchmark as bench
+from .benchmark import benchmarked
 from .logging_utils import get_logger
 
 log = get_logger(__name__)
@@ -203,6 +205,20 @@ def _find_gmx() -> Optional[str]:
     return _f()
 
 
+def _gmx_blend_after(rec, a, res) -> None:
+    rec.metric(chains=sum(int(c.count) for c in a["components"]))
+    rec.size_from(res[0])
+
+
+@benchmarked(
+    "blend_gromacs",
+    folder=lambda a: Path(a["out_dir"]),
+    workload=lambda a: {
+        "components": ", ".join(f"{c.name} x{c.count} ({Path(c.gro_file).name})"
+                                for c in a["components"]),
+        "box": "x".join(f"{float(x):g}" for x in a["box_edges_ang"]),
+        "try_count": a["try_count"]},
+    after=_gmx_blend_after)
 def replicate_gromacs_blend(
     components: List[GromacsBlendComponent],
     box_edges_ang: Tuple[float, float, float],
@@ -224,7 +240,9 @@ def replicate_gromacs_blend(
                            "installed (gmx or gmx_mpi on PATH).")
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    bench.phase("merge topologies")
     out_top = merge_tops(components, out_dir)       # fail before any packing
+    bench.phase("insert molecules (gmx)")
 
     a, b, c = (e / 10.0 for e in box_edges_ang)     # Å -> nm
     current: Optional[Path] = None
@@ -259,6 +277,7 @@ def replicate_gromacs_blend(
                 f"the counts; a partially packed blend is not written.")
         current = target
 
+    bench.phase("write GROMACS files")
     out_gro = out_dir / "packed_blend.gro"
     shutil.copy2(current, out_gro)
     for i in range(len(components)):

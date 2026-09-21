@@ -47,39 +47,19 @@ class _CGWorker(QObject):
 
     @pyqtSlot()
     def run(self):
+        from ..benchmark import benchmark
         from ..cell.packing import PackCancelled
         try:
             o = self.o
-            from ..cell.cg_model import CGSettings, build_cg_cell
-            from ..cell.composition import Component, from_chain_counts
-            from ..cell.grow import grow_amorphous_cell
-
-            comps = [Component(name=r["name"], repeat_unit=r["smiles"],
-                               degree_of_polymerisation=r["dp"],
-                               n_chains=r["chains"], ris_key=r["name"])
-                     for r in o["rows"]]
-            comp = from_chain_counts(comps, o["density"],
-                                     build_fraction=o["build_fraction"])
-            self.progress.emit(
-                f"growing {sum(c.n_chains for c in comps)} chain(s) in a "
-                f"{comp.box_edge_a:.1f} A box …")
-            res = grow_amorphous_cell(
-                comp.grow_specs(), comp.box(),
-                temperature=o["temperature"], seed=o["seed"],
-                tolerance=o["tolerance"],
-                cancel=self._cancel,
-                progress=self.progress.emit)
-            cn = float(getattr(res, "mean_c_n", 0.0) or 0.0)
-            if cn:
-                self.progress.emit(f"measured mean C_n = {cn:.2f}")
-            st = CGSettings(units=o["units"], mapping=o["mapping"],
-                            angle_mode=o["angle_mode"],
-                            angle_k=o["angle_k"],
-                            target_cn=o["target_cn"],
-                            temperature_k=o["temperature"])
-            data, inp = build_cg_cell(
-                res, comp.grow_specs(), o["out_dir"], name=o["name"],
-                settings=st, measured_cn=cn, progress=self.progress.emit)
+            workload = {k: o.get(k) for k in (
+                "rows", "density", "build_fraction", "temperature", "seed",
+                "tolerance", "units", "mapping", "angle_mode", "angle_k",
+                "target_cn")}
+            folder = (Path(o["out_dir"]) / o["name"]
+                      if o.get("out_dir") else None)
+            with benchmark("cg_builder", folder, workload=workload,
+                           emit=self.progress.emit):
+                data, inp = self._build()
             self.finished.emit((data, inp))
         except PackCancelled:
             self.progress.emit("build cancelled")
@@ -87,6 +67,44 @@ class _CGWorker(QObject):
         except Exception as exc:
             self.progress.emit(traceback.format_exc())
             self.failed.emit(str(exc) or exc.__class__.__name__)
+
+    def _build(self):
+        from .. import benchmark as bench
+        o = self.o
+        from ..cell.cg_model import CGSettings, build_cg_cell
+        from ..cell.composition import Component, from_chain_counts
+        from ..cell.grow import grow_amorphous_cell
+
+        comps = [Component(name=r["name"], repeat_unit=r["smiles"],
+                           degree_of_polymerisation=r["dp"],
+                           n_chains=r["chains"], ris_key=r["name"])
+                 for r in o["rows"]]
+        comp = from_chain_counts(comps, o["density"],
+                                 build_fraction=o["build_fraction"])
+        bench.phase("grow chains")
+        self.progress.emit(
+            f"growing {sum(c.n_chains for c in comps)} chain(s) in a "
+            f"{comp.box_edge_a:.1f} A box …")
+        res = grow_amorphous_cell(
+            comp.grow_specs(), comp.box(),
+            temperature=o["temperature"], seed=o["seed"],
+            tolerance=o["tolerance"],
+            cancel=self._cancel,
+            progress=self.progress.emit)
+        cn = float(getattr(res, "mean_c_n", 0.0) or 0.0)
+        if cn:
+            self.progress.emit(f"measured mean C_n = {cn:.2f}")
+        st = CGSettings(units=o["units"], mapping=o["mapping"],
+                        angle_mode=o["angle_mode"],
+                        angle_k=o["angle_k"],
+                        target_cn=o["target_cn"],
+                        temperature_k=o["temperature"])
+        bench.end_phase()
+        data, inp = build_cg_cell(
+            res, comp.grow_specs(), o["out_dir"], name=o["name"],
+            settings=st, measured_cn=cn, progress=self.progress.emit)
+        bench.metric(chains=sum(c.n_chains for c in comps))
+        return data, inp
 
 
 # ================================================================== tab

@@ -383,7 +383,9 @@ def _assign_antechamber(mol: Molecule, ff: ForceField) -> None:
         "-at", at, "-c", "bcc", "-s", "0",
     ]
     log.info("Running: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True)
+    from .benchmark import external
+    with external(cmd):
+        subprocess.run(cmd, check=True)
     typed = tmpdir / "typed.mol2"
     # parse types from mol2
     types = _read_mol2_types(typed)

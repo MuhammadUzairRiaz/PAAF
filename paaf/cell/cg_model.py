@@ -39,6 +39,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from ..benchmark import benchmarked
 from ..logging_utils import get_logger
 from .soft_stage import soft_stage_lines
 
@@ -157,6 +158,12 @@ def _group_positions(xyz: np.ndarray, groups: List[List[int]],
 
 
 # ================================================================ builder
+@benchmarked(
+    "cg_export",
+    folder=lambda a: Path(a["out_dir"]) / a["name"],
+    workload=lambda a: {"beads": len(a["result"].molecule.atoms),
+                        "settings": repr(a["settings"])},
+    after=lambda rec, a, res: rec.size_from(res[0]))
 def build_cg_cell(
     result,
     specs: Sequence,

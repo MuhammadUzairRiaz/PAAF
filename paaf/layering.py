@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 
 from .blend_replicator import BlendComponent, replicate_blend
+from .benchmark import benchmarked
 from .logging_utils import get_logger
 
 log = get_logger(__name__)
@@ -130,6 +131,23 @@ def plan_regions(
     return regions, total_box
 
 
+def _layer_after(rec, a, out) -> None:
+    rec.metric(chains=sum(int(ly.count) for ly in a["layers"]),
+               layers=len(a["layers"]))
+    rec.size_from(out)
+
+
+@benchmarked(
+    "layering",
+    folder=lambda a: Path(a["out_data_file"]).parent,
+    workload=lambda a: {
+        "layers": ", ".join(
+            f"{ly.name} x{ly.count} ({Path(ly.data_file).name}, "
+            + "x".join(f"{float(s):g}" for s in ly.size) + ")"
+            for ly in a["layers"]),
+        "axis": a["axis"], "gap": a["gap"], "tolerance": a["tolerance"],
+        "minimise": bool(getattr(a["minimise"], "enabled", False))},
+    after=_layer_after)
 def build_layered_cell(
     layers: List[LayerSpec],
     out_data_file: Path,

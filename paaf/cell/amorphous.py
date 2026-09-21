@@ -36,6 +36,7 @@ from typing import List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from ..benchmark import benchmarked
 from ..logging_utils import get_logger
 from ..structure import Atom, Molecule, load_structure, write
 
@@ -390,6 +391,15 @@ def _pack_grid(
 
 
 # ============================================================ top-level
+@benchmarked(
+    "pack_cell",
+    folder=lambda a: Path(a["out_path"]).parent if a["out_path"] else None,
+    workload=lambda a: {
+        "species": ", ".join(f"{s.name or s.file} x{s.count}"
+                             for s in a["specs"]),
+        "density_kg_m3": a["density_kg_m3"], "box_ang": a["box_ang"],
+        "backend": a["backend"]},
+    after=lambda rec, a, res: rec.metric(atoms=len(res[0].atoms)))
 def pack_cell(
     specs: Sequence[PackSpec],
     density_kg_m3: Optional[float] = None,

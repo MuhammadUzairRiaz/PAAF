@@ -37,6 +37,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
+from . import benchmark as bench
+from .benchmark import benchmarked
 from .logging_utils import get_logger
 from .structure import Atom, Molecule
 
@@ -220,6 +222,29 @@ def _type_with_dlfield(structure: Path, work_dir: Path, ff_key: str,
 
 
 # =================================================================== top level
+def _reaction_after(rec, a, exp) -> None:
+    rec.metric(atoms=sum(s.n_atoms for s in (exp.reactant, exp.product) if s)
+               or None)
+
+
+def _reaction_folder(out_dir, name: str) -> Path:
+    # Folder-safe name. Example names like "ENR + maleic acid + ENR
+    # (bridge)" made a folder with spaces, and DL_FIELD's Fortran parser
+    # reads the config path only up to the first space — "User
+    # configuration file format not recognise." on a perfectly good xyz.
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "reaction"
+    return Path(out_dir) / safe
+
+
+@benchmarked(
+    "reaction_export",
+    folder=lambda a: _reaction_folder(a["out_dir"], a["name"]),
+    workload=lambda a: {
+        "reactants": list(a["reactants"]), "products": list(a["products"]),
+        "force_field": a["ff_key"], "typing": a["run_typing"],
+        "optimize": f"{a['opt_ff']} {a['opt_steps']} steps"
+                    if a["optimize"] else "off"},
+    after=_reaction_after)
 def export_reaction(
     name: str,
     reactants: Sequence[str],
@@ -240,12 +265,7 @@ def export_reaction(
     ``reactant.data`` / ``product.data`` when ``run_typing`` succeeds.
     """
     emit = progress or (lambda _m: None)
-    # Folder-safe name. Example names like "ENR + maleic acid + ENR
-    # (bridge)" made a folder with spaces, and DL_FIELD's Fortran parser
-    # reads the config path only up to the first space — "User
-    # configuration file format not recognise." on a perfectly good xyz.
-    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("_") or "reaction"
-    folder = Path(out_dir) / safe
+    folder = _reaction_folder(out_dir, name)
     folder.mkdir(parents=True, exist_ok=True)
     export = ReactionExport(name=name, folder=folder)
 
@@ -258,10 +278,12 @@ def export_reaction(
 
     sides = (("reactant", list(reactants)), ("product", list(products)))
     for label, smiles_list in sides:
+        bench.phase(f"{label}: 3D embedding")
         emit(f"  {label}: embedding {len(smiles_list)} molecule(s) in 3D …")
         mol, maps = build_3d_side(smiles_list, label=label)
 
         if optimize:
+            bench.phase(f"{label}: optimisation")
             emit(f"  {label}: optimising ({opt_ff}) …")
             try:
                 from . import optimizer
@@ -269,6 +291,7 @@ def export_reaction(
             except Exception as exc:
                 emit(f"  {label}: optimisation skipped ({exc})")
 
+        bench.phase(f"{label}: write structures")
         xyz = folder / f"{label}.xyz"
         mol.to_xyz(xyz)
         # A mol2 keeps explicit bond orders, which dl_field perceives better
@@ -290,6 +313,7 @@ def export_reaction(
             # cannot read PAAF's mol2 ("Can't locate any sensible
             # information in config file") and perceives its own bonds from
             # geometry anyway.
+            bench.phase(f"{label}: typing (DL_FIELD)")
             try:
                 data = _type_with_dlfield(
                     xyz, folder / f"_typing_{label}", ff_key,

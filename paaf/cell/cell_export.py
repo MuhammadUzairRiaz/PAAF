@@ -39,6 +39,8 @@ from typing import Callable, Dict, List, Optional, Sequence
 
 import numpy as np
 
+from .. import benchmark as bench
+from ..benchmark import benchmarked
 from ..logging_utils import get_logger
 from ..structure import Atom, Molecule
 
@@ -259,8 +261,11 @@ def _run_moltemplate(system_lt: Path, work_dir: Path,
         return None
     emit(f"    moltemplate.sh {system_lt.name} …")
     try:
-        proc = subprocess.run([exe, system_lt.name], cwd=str(work_dir),
-                              capture_output=True, text=True, timeout=1800)
+        from ..benchmark import external
+        with external(exe):
+            proc = subprocess.run([exe, system_lt.name], cwd=str(work_dir),
+                                  capture_output=True, text=True,
+                                  timeout=1800)
     except Exception as exc:
         emit(f"    moltemplate failed to launch: {exc}")
         return None
@@ -578,6 +583,22 @@ def _find_dlfield_styles_file(work_dir: Path):
     return None
 
 # =====================================================================
+def _export_after(rec, a, exp) -> None:
+    rec.metric(atoms=exp.n_atoms or None, beads=exp.n_beads)
+    for f in (exp.typed_data, exp.atomistic_xyz, exp.bead_data):
+        rec.size_from(f)
+
+
+@benchmarked(
+    "amorphous_cell_export",
+    folder=lambda a: Path(a["out_dir"]) / a["name"],
+    workload=lambda a: {
+        "force_field": a["ff_key"], "atomistic": a["atomistic"],
+        "tacticity": a["tacticity"], "typing": a["run_typing"],
+        "push_off": a["push_off"], "relax": a["relax"],
+        "formats": a["output_formats"], "lammps_styles": a["lammps_styles"],
+        "beads": len(a["result"].molecule.atoms)},
+    after=_export_after)
 def export_cell(
     result,
     specs: Sequence,
@@ -609,6 +630,7 @@ def export_cell(
     exp = CellExport(folder=folder, n_beads=len(result.molecule.atoms))
 
     # ---- 1. the beads, always -------------------------------------
+    bench.phase("write bead cell")
     emit("  writing the bead cell …")
     exp.bead_xyz = folder / "cell_beads.xyz"
     result.molecule.to_xyz(exp.bead_xyz)
@@ -637,6 +659,7 @@ def export_cell(
         emit(exp.summary())
         return exp
 
+    bench.phase("back-map beads to atoms")
     emit("  back-mapping beads to atoms …")
     try:
         bm = _bm.backmap_cell(result, specs, tacticity=tacticity,
@@ -695,6 +718,7 @@ def export_cell(
     # "cannot run a force field until typed". Skipped cleanly when LAMMPS
     # is not installed; the cell is then exported as before.
     if run_typing:
+        bench.phase("soft push-off (LAMMPS)")
         try:
             from .soft_pushoff import soft_pushoff
             soft_pushoff(bm.molecule, _dims, folder / "_pushoff",
@@ -707,6 +731,7 @@ def export_cell(
                 raise                      # a cancel is not a "skip"
             emit(f"  soft push-off skipped ({_exc})")
 
+    bench.phase("write atomistic cell")
     exp.atomistic_xyz = folder / "cell_atomistic.xyz"
     bm.molecule.to_xyz(exp.atomistic_xyz)
     try:
@@ -730,6 +755,7 @@ def export_cell(
         return exp
 
     # ---- 3. type it, by the route the force field implies ----------
+    bench.phase("force-field typing")
     from ..ff_registry import REGISTRY
     ff = REGISTRY.get(ff_key)
     if ff is None:
@@ -895,6 +921,7 @@ def export_cell(
         relax_cell_gromacs,
     )
 
+    bench.phase("relaxation")
     rset = relax_settings or RelaxSettings()
     engine = choose_engine(ff_key, getattr(rset, "engine", "auto"))
     if engine == "gromacs" and not use_dlfield:

@@ -115,12 +115,19 @@ def run_cancellable(cmd, *, cwd=None, timeout_s=None, cancel=None,
     stages — subprocess.run() blocks, so the button "worked" only after
     the external program finished on its own.
     """
-    import subprocess as _sp
-    import time as _time
+    from ..benchmark import external
 
     if cancel is not None and cancel.is_cancelled():
         # Already cancelled: do not start a program only to kill it.
         raise PackCancelled("cancelled before an external program started")
+    with external(cmd):
+        return _run_polling(cmd, cwd, timeout_s, cancel, poll_s, stdin)
+
+
+def _run_polling(cmd, cwd, timeout_s, cancel, poll_s, stdin):
+    import subprocess as _sp
+    import time as _time
+
     proc = _sp.Popen(cmd, cwd=cwd, stdin=stdin, stdout=_sp.PIPE,
                      stderr=_sp.PIPE, text=True)
     start = _time.monotonic()
