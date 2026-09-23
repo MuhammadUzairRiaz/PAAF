@@ -388,10 +388,14 @@ class GrowSpec:
         every bead takes its mass and radius from the monomer it actually
         belongs to rather than from a chain-wide average.
     arrangement :
-        ``random`` (default), ``alternating``, ``block`` or ``exact``.
+        ``random`` (default), ``alternating``, ``block``, ``gradient``,
+        ``multiblock`` or ``exact``.
     sequence_seed :
         Separate from the growth seed, so the same monomer sequence can be
         grown into different conformations.
+    block_pattern, block_fill :
+        The block configuration for ``multiblock`` (``"A5-B4-B3-A3"``) and
+        whether it is repeated or stretched to the chain length.
     """
     repeat_unit: str = ""
     n_chains: int = 1
@@ -403,6 +407,8 @@ class GrowSpec:
     monomers: Optional[List[object]] = None      # List[sequence.Monomer]
     arrangement: str = "random"
     sequence_seed: int = 0
+    block_pattern: str = ""
+    block_fill: str = "repeat"
 
     # ------------------------------------------------------------------
     @property
@@ -422,7 +428,8 @@ class GrowSpec:
         return build_sequence(
             self.monomers, int(self.degree_of_polymerisation),
             arrangement=self.arrangement,
-            seed=self.sequence_seed + 7919 * chain_index)
+            seed=self.sequence_seed + 7919 * chain_index,
+            pattern=self.block_pattern, fill=self.block_fill)
 
 
 @dataclass

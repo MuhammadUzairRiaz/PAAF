@@ -70,10 +70,10 @@ def test_alternating_and_block_do_what_they_say():
     assert blk.order == [0, 0, 0, 0, 1, 1, 1, 1]
 
 
-def test_alternating_refuses_more_than_two_monomers():
+def test_alternating_cycles_through_three_monomers():
     mons = _enr(0.34) + [Monomer("[*]CC[*]", 0.33, "PE")]
-    with pytest.raises(ValueError):
-        build_sequence(mons, 9, "alternating")
+    seq = build_sequence(mons, 9, "alternating")
+    assert seq.order == [0, 1, 2] * 3
 
 
 def test_block_never_drops_a_requested_monomer():

@@ -575,8 +575,9 @@ class MainWindow(QMainWindow):
         _intro = QLabel(
             "<b>Chain — Step 2</b><br>"
             "Homopolymer: one monomer repeated N times. "
-            "Copolymer: 2 monomers with a chosen fraction and sequence mode "
-            "(random / alternating / block)."
+            "Copolymer: 2 or more monomers with chosen fractions and a "
+            "sequence mode (random / alternating / block / gradient / "
+            "multiblock)."
         )
         _intro.setWordWrap(True)
         v.addWidget(_intro)
@@ -586,16 +587,26 @@ class MainWindow(QMainWindow):
         f = QFormLayout(gb)
         self.chain_n = QSpinBox(); self.chain_n.setRange(1, 100000); self.chain_n.setValue(20)
         self.chain_mode = QComboBox()
-        self.chain_mode.addItems(["homopolymer", "alternating", "block", "random"])
+        self.chain_mode.addItems(["homopolymer", "alternating", "block", "random",
+                                  "gradient", "multiblock"])
         self.chain_backend = QComboBox(); self.chain_backend.addItems(["auto", "mbuild", "simple"])
         self.chain_fractions = QLineEdit(); self.chain_fractions.setPlaceholderText("0.7,0.3 (for random)")
         self.chain_blocks = QLineEdit(); self.chain_blocks.setPlaceholderText("5,5 (for block)")
-        self.chain_seed = QLineEdit(); self.chain_seed.setPlaceholderText("int (optional)")
+        self.chain_pattern = QLineEdit()
+        self.chain_pattern.setPlaceholderText(
+            "AAAAA-BBBB-BBB-AAA or A5-B4-B3-A3 (for multiblock)")
+        self.chain_fill = QComboBox()
+        self.chain_fill.addItem("repeat to chain length", "repeat")
+        self.chain_fill.addItem("stretch to chain length", "stretch")
+        self.chain_seed = QLineEdit(); self.chain_seed.setPlaceholderText(
+            "int (optional) — same seed, same sequence")
         f.addRow("Total monomers per chain", self.chain_n)
         f.addRow("Sequence mode", self.chain_mode)
         f.addRow("Backend", self.chain_backend)
-        f.addRow("Fractions (random)", self.chain_fractions)
+        f.addRow("Fractions (random / gradient)", self.chain_fractions)
         f.addRow("Block sizes (block)", self.chain_blocks)
+        f.addRow("Block pattern (multiblock)", self.chain_pattern)
+        f.addRow("Pattern fill (multiblock)", self.chain_fill)
         f.addRow("Random seed", self.chain_seed)
         # Auto-cap the polyester terminal (only takes effect for monomers
         # whose tail heavy atom is a carbonyl C, e.g. PBS/PET/PLA). Left on
@@ -632,7 +643,7 @@ class MainWindow(QMainWindow):
         self.co_total = QSpinBox()
         self.co_total.setRange(2, 100000); self.co_total.setValue(20)
         self.co_mode = QComboBox()
-        self.co_mode.addItems(["random", "alternating", "block"])
+        self.co_mode.addItems(["random", "alternating", "block", "gradient"])
         self.co_seed = QLineEdit(); self.co_seed.setPlaceholderText("int (optional)")
 
         b_apply_co = QPushButton("Apply to chain settings")
@@ -1357,14 +1368,20 @@ class MainWindow(QMainWindow):
             return
         fa = settings.get("fraction_a", 1.0 - settings.get("fraction_b", 0.5))
         fb = settings.get("fraction_b", 1.0 - fa)
+        fractions = settings.get("fractions") or [fa, fb]
         if hasattr(self, "chain_n"):
             self.chain_n.setValue(settings["total"])
         if hasattr(self, "chain_mode"):
             self.chain_mode.setCurrentText(settings["mode"])
         if hasattr(self, "chain_fractions"):
-            self.chain_fractions.setText(f"{fa:.2f},{fb:.2f}")
-        if settings.get("seed") is not None and hasattr(self, "chain_seed"):
-            self.chain_seed.setText(str(settings["seed"]))
+            self.chain_fractions.setText(",".join(f"{x:.4g}" for x in fractions))
+        if hasattr(self, "chain_pattern"):
+            self.chain_pattern.setText(settings.get("pattern") or "")
+            self.chain_fill.setCurrentIndex(max(0, self.chain_fill.findData(
+                settings.get("fill") or "repeat")))
+        if hasattr(self, "chain_seed"):
+            seed = settings.get("seed")
+            self.chain_seed.setText("" if seed is None else str(seed))
 
     # ------------------------------------------------ FF handlers
     # ---- GROMACS-packing visibility / mode helpers
@@ -1804,6 +1821,8 @@ class MainWindow(QMainWindow):
                 n_monomers=self.chain_n.value(),
                 mode=self.chain_mode.currentText(),
                 fractions=fractions, block_sizes=blocks,
+                block_pattern=self.chain_pattern.text().strip() or None,
+                block_fill=self.chain_fill.currentData() or "repeat",
                 seed=int(seed_txt) if seed_txt else None,
                 backend=self.chain_backend.currentText(),
                 cap_carboxyl_end=bool(getattr(self, "chain_cap_cooh",
@@ -1882,7 +1901,10 @@ class MainWindow(QMainWindow):
             self.chain_cap_cooh.setChecked(getattr(cfg.chain, "cap_carboxyl_end", True))
         self.chain_fractions.setText(",".join(str(x) for x in cfg.chain.fractions or []))
         self.chain_blocks.setText(",".join(str(x) for x in cfg.chain.block_sizes or []))
-        self.chain_seed.setText(str(cfg.chain.seed) if cfg.chain.seed else "")
+        self.chain_pattern.setText(getattr(cfg.chain, "block_pattern", None) or "")
+        self.chain_fill.setCurrentIndex(max(0, self.chain_fill.findData(
+            getattr(cfg.chain, "block_fill", "repeat") or "repeat")))
+        self.chain_seed.setText("" if cfg.chain.seed is None else str(cfg.chain.seed))
         for i in range(self.ff_combo.count()):
             if self.ff_combo.itemData(i) == cfg.force_field.key:
                 self.ff_combo.setCurrentIndex(i); break

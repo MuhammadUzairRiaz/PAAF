@@ -52,7 +52,9 @@ def _build(ns: argparse.Namespace) -> int:
         monomers=[MonomerSpec(file=m) for m in ns.monomer],
         optimizer=OptimizerCfg(enabled=not ns.no_opt, ff=ns.opt_ff, steps=ns.opt_steps,
                                tol=ns.opt_tol, algorithm=ns.opt_alg),
-        chain=ChainCfg(n_monomers=ns.n, mode=ns.mode),
+        chain=ChainCfg(n_monomers=ns.n, mode=ns.mode,
+                       fractions=ns.fractions, block_pattern=ns.block_pattern,
+                       block_fill=ns.block_fill, seed=ns.seed),
         box=BoxCfg(n_chains=ns.n_chains,
                    shape="cubic" if len(set(box)) == 1 else "orthorhombic",
                    a=box[0], b=box[1], c=box[2], size=box),
@@ -194,7 +196,22 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--n-chains", type=int, default=1)
     sp.add_argument("--box", type=float, nargs=3, default=[50.0, 50.0, 50.0])
     sp.add_argument("--mode", default="homopolymer",
-                    choices=["homopolymer", "alternating", "block", "random"])
+                    choices=["homopolymer", "alternating", "block", "random",
+                             "gradient", "multiblock"])
+    sp.add_argument("--fractions", type=float, nargs="+", default=None,
+                    help="Mole fraction per monomer (random / gradient), "
+                         "in --monomer order")
+    sp.add_argument("--block-pattern", default=None,
+                    help="Multiblock sections, letters = monomers in --monomer "
+                         "order: 'AAAAA-BBBB-BBB-AAA', 'A5-B4-B3-A3' or "
+                         "'(A5-B5)x3'")
+    sp.add_argument("--block-fill", choices=["repeat", "stretch"],
+                    default="repeat",
+                    help="Pattern shorter than --n: repeat it, or stretch "
+                         "every section in proportion")
+    sp.add_argument("--seed", type=int, default=None,
+                    help="Sequence seed (random / gradient); same seed, same "
+                         "chain")
     sp.add_argument("--ff", default="oplsaa", help="Force field key (see list-ffs)")
     sp.add_argument("--dl-lib", type=Path, default=None,
                     help="Path to dl_f_4.13/lib (needed for PCFF/COMPASS/CVFF/...)")

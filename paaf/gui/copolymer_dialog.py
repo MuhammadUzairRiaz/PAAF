@@ -8,6 +8,11 @@ that, and nothing else.
 Fractions are **mole** fractions, not weight, because the sequence is built by
 counting units. The dialog shows the weight percent each choice comes to, so
 the two are never confused.
+
+Any number of monomers can be added; they are named A, B, C… in table order,
+which is how a multiblock pattern such as ``AAAAA-BBBB-BBB-AAA`` refers to
+them. The sequence seed makes random and gradient chains reproducible, and a
+preview shows the first chain the current settings produce.
 """
 from __future__ import annotations
 
@@ -16,22 +21,34 @@ from typing import List, Optional
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QHBoxLayout, QHeaderView, QLabel, QLineEdit, QPushButton, QSpinBox,
+    QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from . import tokens as T
 from .page import button, caption, label
 
 
+#: (key, label) for every arrangement the dialog offers.
+ARRANGEMENT_CHOICES = (
+    ("random", "Random — independent draw per unit"),
+    ("alternating", "Alternating — ABAB… (ABCABC… for three)"),
+    ("block", "Block — all A, then all B (diblock / triblock)"),
+    ("gradient", "Gradient — A-rich start drifting to B-rich end"),
+    ("multiblock", "Multiblock — your own sections, e.g. AAAAA-BBBB-BBB-AAA"),
+)
+
+
 class CopolymerDialog(QDialog):
     """Pick two or more monomers, their mole fractions, and the arrangement."""
 
     def __init__(self, monomers=None, arrangement: str = "random",
-                 parent: Optional[QWidget] = None):
+                 parent: Optional[QWidget] = None, *, seed: int = 0,
+                 pattern: str = "", fill: str = "repeat", dp: int = 50):
         super().__init__(parent)
         self.setWindowTitle("Copolymer")
-        self.resize(720, 420)
+        self.resize(760, 500)
+        self._dp = max(1, int(dp or 50))
 
         v = QVBoxLayout(self)
         v.setContentsMargins(T.PAD_PAGE, T.PAD_PAGE, T.PAD_PAGE, T.PAD_PAGE)
@@ -50,12 +67,12 @@ class CopolymerDialog(QDialog):
         bar.addWidget(label("Arrangement", T.FS_BODY, T.TEXT_SECONDARY))
         self.arrangement_box = QComboBox()
         self.arrangement_box.setFixedHeight(T.H_CONTROL)
-        for key, human in (("random", "Random — independent draw per unit"),
-                           ("alternating", "Alternating — ABAB (two monomers)"),
-                           ("block", "Block — all A, then all B")):
+        for key, human in ARRANGEMENT_CHOICES:
             self.arrangement_box.addItem(human, key)
         idx = max(0, self.arrangement_box.findData(arrangement or "random"))
         self.arrangement_box.setCurrentIndex(idx)
+        self.arrangement_box.currentIndexChanged.connect(
+            lambda _i: self._refresh())
         bar.addWidget(self.arrangement_box, 1)
 
         b_add = button("+ Add monomer")
@@ -78,16 +95,64 @@ class CopolymerDialog(QDialog):
         bar.addWidget(b_save)
         v.addLayout(bar)
 
+        # Multiblock configuration + sequence seed. The pattern row only
+        # shows for multiblock; the seed matters for random and gradient.
+        seq_row = QHBoxLayout()
+        seq_row.setSpacing(T.GAP_LABEL)
+        self.pattern_label = label("Blocks", T.FS_BODY, T.TEXT_SECONDARY)
+        seq_row.addWidget(self.pattern_label)
+        self.pattern_edit = QLineEdit(pattern or "")
+        self.pattern_edit.setFixedHeight(T.H_CONTROL)
+        self.pattern_edit.setPlaceholderText(
+            "AAAAA-BBBB-BBB-AAA   or   A5-B4-B3-A3   or   (A5-B5)x3 C4")
+        self.pattern_edit.setToolTip(
+            "One section per block, letters = monomers in table order "
+            "(A is row 1, B row 2, C row 3…). Write the letters out "
+            "(AAAAA) or a letter and a length (A5). Separate sections "
+            "with '-', spaces or commas; (…)xN repeats a group.")
+        self.pattern_edit.textChanged.connect(lambda _t: self._refresh())
+        seq_row.addWidget(self.pattern_edit, 1)
+        self.fill_box = QComboBox()
+        self.fill_box.setFixedHeight(T.H_CONTROL)
+        self.fill_box.addItem("repeat to chain length", "repeat")
+        self.fill_box.addItem("stretch to chain length", "stretch")
+        self.fill_box.setToolTip(
+            "When the pattern is shorter than the chain: repeat it (A5-B5 "
+            "on 30 units → A5-B5-A5-B5-A5-B5) or scale every section in "
+            "proportion (→ A15-B15).")
+        self.fill_box.setCurrentIndex(max(0, self.fill_box.findData(fill)))
+        self.fill_box.currentIndexChanged.connect(lambda _i: self._refresh())
+        seq_row.addWidget(self.fill_box)
+        seq_row.addSpacing(T.GAP_LABEL)
+        seq_row.addWidget(label("Seed", T.FS_BODY, T.TEXT_SECONDARY))
+        self.seed_box = QSpinBox()
+        self.seed_box.setRange(0, 2_000_000_000)
+        self.seed_box.setValue(int(seed or 0))
+        self.seed_box.setFixedHeight(T.H_CONTROL)
+        self.seed_box.setToolTip(
+            "Sequence seed. The same seed gives the same monomer order on "
+            "every chain, every run — change it for a different draw. "
+            "Chain k uses seed + 7919·k, so chains still differ from each "
+            "other.")
+        self.seed_box.valueChanged.connect(lambda _v: self._refresh())
+        seq_row.addWidget(self.seed_box)
+        v.addLayout(seq_row)
+
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(
             ["name", "SMILES", "mole %", "→ weight %"])
         self.table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.Stretch)
-        self.table.verticalHeader().setVisible(False)
+        # Row headers are the letters a multiblock pattern uses.
         self.table.verticalHeader().setDefaultSectionSize(T.H_TABLE_ROW)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.itemChanged.connect(lambda _i: self._refresh())
         v.addWidget(self.table, 1)
+
+        self.preview = label("", T.FS_CAPTION, T.TEXT_SECONDARY, mono=True)
+        self.preview.setWordWrap(True)
+        self.preview.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        v.addWidget(self.preview)
 
         self.summary = caption("")
         self.summary.setWordWrap(True)
@@ -167,6 +232,8 @@ class CopolymerDialog(QDialog):
         idx = self.arrangement_box.findData(rec.sequence_mode or "random")
         if idx >= 0:
             self.arrangement_box.setCurrentIndex(idx)
+        if rec.random_seed is not None:
+            self.seed_box.setValue(int(rec.random_seed))
         self._refresh()
 
     def _save_preset(self) -> None:
@@ -202,7 +269,7 @@ class CopolymerDialog(QDialog):
             path = save_copolymer(CopolymerRecipe(
                 pid=pid, smiles_a=mons[0].smiles, smiles_b=mons[1].smiles,
                 fraction_b=mons[1].fraction,
-                sequence_mode=self.arrangement(), random_seed=None))
+                sequence_mode=self.arrangement(), random_seed=self.seed()))
         except Exception as exc:
             self.summary.setText(f"Could not save: {exc}")
             return
@@ -240,8 +307,16 @@ class CopolymerDialog(QDialog):
         from ..cell.grow import max_backbone_atoms_in_a_ring
 
         rows = [(n, s, f) for n, s, f in self._rows() if s]
+        multiblock = self.arrangement() == "multiblock"
+        for w in (self.pattern_label, self.pattern_edit, self.fill_box):
+            w.setVisible(multiblock)
+        self.seed_box.setEnabled(self.arrangement() in ("random", "gradient"))
+        from ..sequence_patterns import letter
+        self.table.setVerticalHeaderLabels(
+            [letter(r) for r in range(self.table.rowCount())])
         if not rows:
             self.summary.setText("Add at least two monomers.")
+            self.preview.setText("")
             return
         mons = []
         problems = []
@@ -259,6 +334,12 @@ class CopolymerDialog(QDialog):
                     f"as all-atom.")
             mons.append(m)
 
+        pattern_fracs = self._pattern_fractions(len(rows))
+        if pattern_fracs is not None and len(mons) == len(rows):
+            # Multiblock: the pattern, not the mole % column, sets the mix.
+            for m, f in zip(mons, pattern_fracs):
+                m.fraction = f
+
         total_mol = sum(m.fraction for m in mons) or 1.0
         total_mass = sum(m.mass_amu * m.fraction for m in mons) or 1.0
         self.table.blockSignals(True)
@@ -269,11 +350,19 @@ class CopolymerDialog(QDialog):
                 it.setText(f"{wt:.1f}")
         self.table.blockSignals(False)
 
+        self._refresh_preview(mons, problems)
+
         mean = sum(m.mass_amu * m.fraction for m in mons) / total_mol
         beads = sum(m.backbone_atoms * m.fraction for m in mons) / total_mol
         msg = (f"{len(mons)} monomers · mean repeat unit {mean:.1f} g/mol · "
                f"{beads:.1f} skeletal atoms per unit on average.")
-        if abs(total_mol - 1.0) > 1e-6 and abs(total_mol - 100.0) > 1e-6:
+        if pattern_fracs is not None:
+            from ..sequence_patterns import letter
+            msg += ("  Multiblock: the pattern sets the composition ("
+                    + " / ".join(f"{letter(i)} {100 * f:.0f}%"
+                                 for i, f in enumerate(pattern_fracs))
+                    + " mol), the mole % column is ignored.")
+        elif abs(total_mol - 1.0) > 1e-6 and abs(total_mol - 100.0) > 1e-6:
             msg += "  Fractions are normalised, so any consistent ratio works."
         if problems:
             msg += "  " + "  ".join(problems)
@@ -282,6 +371,64 @@ class CopolymerDialog(QDialog):
             f"color: {T.WARN_TEXT if problems else T.TEXT_MUTED};"
             f" font-size: {T.FS_CAPTION}px; background: transparent;"
             f" border: none;")
+
+    def _pattern_fractions(self, n_monomers: int) -> Optional[List[float]]:
+        """Mole fractions a multiblock pattern gives at this DP, else None."""
+        if self.arrangement() != "multiblock":
+            return None
+        from ..sequence_patterns import multiblock_order, parse_block_pattern
+        try:
+            order = multiblock_order(
+                parse_block_pattern(self.pattern(), n_monomers),
+                self._dp, self.fill())
+        except ValueError:
+            return None
+        return [order.count(i) / len(order) for i in range(n_monomers)]
+
+    def _refresh_preview(self, mons, problems) -> None:
+        """Show the first chain the current settings produce, run-length coded.
+
+        Built with the same function the grower calls, so what is previewed
+        is what gets built (for chain 1; later chains use their own seeds).
+        """
+        from ..cell.sequence import build_sequence
+        from ..sequence_patterns import letter, run_length
+        if len(mons) < 2:
+            self.preview.setText("")
+            return
+        try:
+            seq = build_sequence(mons, self._dp, self.arrangement(),
+                                 seed=self.seed(), pattern=self.pattern(),
+                                 fill=self.fill(), quiet=True)
+        except Exception as exc:
+            self.preview.setText("")
+            problems.append(str(exc))
+            return
+        # build_sequence drops zero-fraction monomers except for multiblock,
+        # so map back to table letters by identity before printing.
+        index = {id(m): i for i, m in enumerate(mons)}
+        order = [index.get(id(seq.monomers[u]), u) for u in seq.order]
+        spelled = "".join(letter(u) for u in order)
+        if len(spelled) > 90:
+            spelled = spelled[:90] + "…"
+        self.preview.setText(
+            f"Chain 1 at DP {self._dp}: {run_length(order, limit=16)}\n"
+            f"{spelled}")
+
+    def accept(self) -> None:
+        """Refuse to close on a multiblock pattern that cannot be built."""
+        if not self._cleared and self.arrangement() == "multiblock":
+            from ..sequence_patterns import parse_block_pattern
+            n = len([1 for _n, s, _f in self._rows() if s])
+            try:
+                parse_block_pattern(self.pattern(), n)
+            except ValueError as exc:
+                self.summary.setText(str(exc))
+                self.summary.setStyleSheet(
+                    f"color: {T.WARN_TEXT}; font-size: {T.FS_CAPTION}px;"
+                    f" background: transparent; border: none;")
+                return
+        super().accept()
 
     def monomers(self):
         """The monomers, or ``None`` if the user chose homopolymer.
@@ -298,14 +445,30 @@ class CopolymerDialog(QDialog):
                 for name, smi, frac in self._rows() if smi]
         if len(rows) < 2:
             return None
+        pattern_fracs = self._pattern_fractions(len(rows))
+        if pattern_fracs is not None:
+            rows = [(n, s, f) for (n, s, _f), f in zip(rows, pattern_fracs)]
         total = sum(f for _n, _s, f in rows)
         if total <= 0:                       # nothing entered: split evenly
             total, rows = len(rows), [(n, s, 1.0) for n, s, _f in rows]
         return [Monomer(smi, frac / total, name) for name, smi, frac in rows]
 
     def arrangement(self) -> str:
-        """``random`` | ``alternating`` | ``block``."""
+        """``random`` | ``alternating`` | ``block`` | ``gradient`` |
+        ``multiblock``."""
         return self.arrangement_box.currentData() or "random"
+
+    def seed(self) -> int:
+        """Sequence seed: the same value rebuilds the same sequences."""
+        return int(self.seed_box.value())
+
+    def pattern(self) -> str:
+        """Multiblock sections as typed, e.g. ``A5-B4-B3-A3``."""
+        return self.pattern_edit.text().strip()
+
+    def fill(self) -> str:
+        """``repeat`` | ``stretch`` — how a short pattern covers the chain."""
+        return self.fill_box.currentData() or "repeat"
 
 
 class _PresetPicker(QDialog):

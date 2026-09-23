@@ -23,7 +23,8 @@ from .structure import Atom, Molecule
 
 log = get_logger(__name__)
 
-SequenceMode = Literal["homopolymer", "block", "alternating", "random"]
+SequenceMode = Literal["homopolymer", "block", "alternating", "random",
+                       "gradient", "multiblock"]
 
 
 # ================================================================ SIMPLE BACKEND
@@ -389,6 +390,8 @@ def build_chain(
     fractions: Optional[Sequence[float]] = None,
     block_sizes: Optional[Sequence[int]] = None,
     seed: Optional[int] = None,
+    block_pattern: Optional[str] = None,
+    block_fill: str = "repeat",
     backend: Literal["mbuild", "simple", "auto"] = "auto",
     cap_carboxyl_end: bool = True,
     relax_conformation: bool = True,
@@ -415,17 +418,27 @@ def build_chain(
     mode :
         - homopolymer: always monomer[0]
         - block: A_{k}B_{k}... using block_sizes (default n/len(monomers) each)
-        - alternating: ABAB...
+        - alternating: ABAB... (ABCABC... for three monomers)
         - random: sampled with given `fractions`
+        - gradient: A-rich start drifting to B-rich end, counts from `fractions`
+        - multiblock: the sections written in `block_pattern`
     fractions : list of float, sums to 1
-        Only used for mode="random". Defaults to equal fractions.
+        Used for mode="random" and "gradient". Defaults to equal fractions.
     block_sizes : list of int
         Only used for mode="block".
     seed : int, optional
-        Seed for random sequence generation.
+        Seed for random and gradient sequence generation. The same seed
+        gives the same sequence.
+    block_pattern, block_fill :
+        Only used for mode="multiblock": sections such as
+        "AAAAA-BBBB-BBB-AAA" or "A5-B4-B3-A3" (letters are monomers in table
+        order), repeated or stretched to ``n`` units.
     """
-    seq = _make_sequence(len(monomers), n, mode, fractions, block_sizes, seed)
-    log.info("Chain sequence: %s", "".join(chr(ord("A") + i) for i in seq[:32]) + ("..." if n > 32 else ""))
+    seq = _make_sequence(len(monomers), n, mode, fractions, block_sizes, seed,
+                         block_pattern=block_pattern, block_fill=block_fill)
+    from .sequence_patterns import run_length
+    log.info("Chain sequence (%s, seed %s): %s", mode, seed,
+             run_length(seq, limit=24))
     _check_junctions(monomers, seq)
 
     def _finish(chain: Molecule) -> Molecule:
@@ -571,11 +584,17 @@ def _make_sequence(
     fractions: Optional[Sequence[float]],
     block_sizes: Optional[Sequence[int]],
     seed: Optional[int],
+    block_pattern: Optional[str] = None,
+    block_fill: str = "repeat",
 ) -> List[int]:
+    from . import sequence_patterns as patterns
     if mode == "homopolymer" or n_monomers == 1:
         return [0] * n
     if mode == "alternating":
-        return [i % n_monomers for i in range(n)]
+        return patterns.alternating_order(n_monomers, n)
+    if mode == "multiblock":
+        sections = patterns.parse_block_pattern(block_pattern or "", n_monomers)
+        return patterns.multiblock_order(sections, n, block_fill)
     if mode == "block":
         block_sizes = list(block_sizes or [max(1, n // n_monomers)] * n_monomers)
         if (len(block_sizes) != n_monomers or any(int(k) < 0 for k in block_sizes)
@@ -596,13 +615,16 @@ def _make_sequence(
                 if len(seq) >= n:
                     break
         return seq[:n]
-    if mode == "random":
+    if mode in ("random", "gradient"):
         fractions = list(fractions or [1.0 / n_monomers] * n_monomers)
         if (len(fractions) != n_monomers or any(float(f) < 0 for f in fractions)
                 or sum(float(f) for f in fractions) <= 0):
             raise ValueError(
-                f"random mode needs {n_monomers} fractions (one per monomer, "
+                f"{mode} mode needs {n_monomers} fractions (one per monomer, "
                 f"non-negative, positive sum), got {fractions}")
+        if mode == "gradient":
+            return patterns.gradient_order([float(f) for f in fractions], n,
+                                           seed=seed)
         rng = random.Random(seed)
         return rng.choices(range(n_monomers), weights=fractions, k=n)
     raise ValueError(f"Unknown sequence mode {mode!r}")

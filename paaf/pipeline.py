@@ -214,6 +214,8 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
         fractions=cfg.chain.fractions,
         block_sizes=cfg.chain.block_sizes,
         seed=cfg.chain.seed,
+        block_pattern=getattr(cfg.chain, "block_pattern", None),
+        block_fill=getattr(cfg.chain, "block_fill", "repeat") or "repeat",
         backend=cfg.chain.backend,
         cap_carboxyl_end=getattr(cfg.chain, "cap_carboxyl_end", True),
         # Step 3 below minimises with the user's Optimize-page settings; no

@@ -682,7 +682,7 @@ class BuilderTab(QWidget):
         # Mode chooser
         row = QHBoxLayout()
         self.rb_homo = QRadioButton("Homopolymer (one monomer)")
-        self.rb_cop  = QRadioButton("Copolymer (two monomers + %)")
+        self.rb_cop  = QRadioButton("Copolymer (two or more monomers + %)")
         self.rb_homo.setChecked(True)
         self._mode_group = QButtonGroup(self)
         self._mode_group.addButton(self.rb_homo)
@@ -726,6 +726,26 @@ class BuilderTab(QWidget):
         self.panel_b.log.connect(self.log.emit)
         cv.addWidget(self.panel_b)
 
+        # Multi-component copolymers: Monomer C, D, … are added on demand
+        # and land in table rows 2, 3, … — the letter a multiblock pattern
+        # uses for them.
+        self._cop_layout = cv
+        self._polymers, self._fragments = polymers, fragments
+        self.extra_panels: List[MonomerInputPanel] = []
+        more = QHBoxLayout()
+        self.b_add_monomer = QPushButton("+ Add monomer C")
+        self.b_add_monomer.setToolTip(wrap_tooltip(
+            "Add another monomer for a terpolymer or higher copolymer. "
+            "It becomes the next letter (C, D, …) in fractions and in a "
+            "multiblock pattern."))
+        self.b_add_monomer.clicked.connect(lambda: self._add_extra_panel())
+        self.b_del_monomer = QPushButton("Remove last monomer")
+        self.b_del_monomer.clicked.connect(self._remove_extra_panel)
+        self.b_del_monomer.setEnabled(False)
+        more.addWidget(self.b_add_monomer); more.addWidget(self.b_del_monomer)
+        more.addStretch(1)
+        cv.addLayout(more)
+
         gb_co = QGroupBox("Copolymer composition")
         fc = QFormLayout(gb_co)
         fc.setContentsMargins(6, 6, 6, 6); fc.setSpacing(4)
@@ -755,13 +775,49 @@ class BuilderTab(QWidget):
         self.co_fraction_b.currentTextChanged.connect(
             lambda _v: self._sync_fractions(edited="B"))
 
+        # Three or more monomers: one comma-separated list replaces the
+        # paired A/B combos.
+        self.co_fractions_multi = QLineEdit()
+        self.co_fractions_multi.setPlaceholderText("e.g. 0.5,0.3,0.2  (A,B,C…)")
+        self.co_fractions_multi.setToolTip(wrap_tooltip(
+            "One mole fraction per monomer, in A, B, C… order. Any "
+            "consistent ratio works — they are normalised."))
+        self.co_fractions_multi.textChanged.connect(self._push_copolymer_settings)
+
         self.co_total = QSpinBox(); self.co_total.setRange(2, 100000); self.co_total.setValue(20)
-        self.co_mode = QComboBox(); self.co_mode.addItems(["random", "alternating", "block"])
+        self.co_mode = QComboBox()
+        self.co_mode.addItems(["random", "alternating", "block", "gradient",
+                               "multiblock"])
+        self.co_mode.setToolTip(wrap_tooltip(
+            "random: independent draw per unit.  alternating: ABAB… "
+            "(ABCABC… for three).  block: all A then all B.  gradient: "
+            "A-rich start drifting to B-rich end.  multiblock: your own "
+            "sections, e.g. AAAAA-BBBB-BBB-AAA."))
+        self.co_pattern = QLineEdit()
+        self.co_pattern.setPlaceholderText(
+            "AAAAA-BBBB-BBB-AAA  or  A5-B4-B3-A3  or  (A5-B5)x3")
+        self.co_pattern.setToolTip(wrap_tooltip(
+            "Multiblock sections, letters = monomers A, B, C… Write the "
+            "letters out (AAAAA) or a letter with a length (A5); separate "
+            "with '-', spaces or commas; (…)xN repeats a group."))
+        self.co_fill = QComboBox()
+        self.co_fill.addItem("repeat to chain length", "repeat")
+        self.co_fill.addItem("stretch to chain length", "stretch")
         self.co_seed = QLineEdit(); self.co_seed.setPlaceholderText("int (optional)")
+        self.co_seed.setToolTip(wrap_tooltip(
+            "Sequence seed for random and gradient chains. The same seed "
+            "rebuilds exactly the same sequence; leave empty for a new "
+            "draw every time."))
+        self.co_preview = QLabel("")
+        self.co_preview.setWordWrap(True)
+        self.co_preview.setProperty("role", "hint")
+        self.co_preview.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
         for w in (self.co_total,):
             w.valueChanged.connect(self._push_copolymer_settings)
         self.co_mode.currentTextChanged.connect(self._push_copolymer_settings)
+        self.co_pattern.textChanged.connect(self._push_copolymer_settings)
+        self.co_fill.currentIndexChanged.connect(self._push_copolymer_settings)
         self.co_seed.textChanged.connect(self._push_copolymer_settings)
 
         # Row: two fraction combos side by side so users see both at once.
@@ -776,11 +832,18 @@ class BuilderTab(QWidget):
         self.co_fraction_note.setWordWrap(True)
         self.co_fraction_note.setProperty("role", "hint")
 
+        self._co_form = fc
+        self._fr_wrap = fr_wrap
         fc.addRow("Fractions", fr_wrap)
+        fc.addRow("Fractions (A,B,C…)", self.co_fractions_multi)
         fc.addRow("", self.co_fraction_note)
         fc.addRow("Total monomers", self.co_total)
         fc.addRow("Sequence mode", self.co_mode)
+        fc.addRow("Block pattern", self.co_pattern)
+        fc.addRow("Pattern fill", self.co_fill)
         fc.addRow("Random seed", self.co_seed)
+        fc.addRow("Preview", self.co_preview)
+        self._sync_copolymer_rows()
         cv.addWidget(gb_co)
         cv.addStretch(1)
         self.stack.addWidget(cop_page)
@@ -864,24 +927,115 @@ class BuilderTab(QWidget):
 
     def _push_copolymer_settings(self):
         """Broadcast copolymer settings so Chain page can auto-fill itself."""
-        if not self.rb_cop.isChecked():
-            self.copolymer_settings_changed.emit({"enabled": False})
+        if not hasattr(self, "co_preview"):
+            return                              # still building the form
+        self._sync_copolymer_rows()
+        settings = self.copolymer_settings()
+        self._update_sequence_preview(settings)
+        self.copolymer_settings_changed.emit(settings)
+
+    # ------------------------------------------------ multi-monomer support
+    def n_copolymer_monomers(self) -> int:
+        return 2 + len(getattr(self, "extra_panels", []))
+
+    def _add_extra_panel(self) -> "MonomerInputPanel":
+        from ..sequence_patterns import letter
+        slot = self.n_copolymer_monomers()
+        if slot >= 26:
+            return self.extra_panels[-1]
+        panel = MonomerInputPanel(slot, f"Monomer {letter(slot)}",
+                                  self._polymers, self._fragments)
+        panel.file_ready.connect(self._on_file_ready)
+        panel.log.connect(self.log.emit)
+        # Insert after the last monomer panel, before the add/remove row.
+        self._cop_layout.insertWidget(slot, panel)
+        self.extra_panels.append(panel)
+        self._after_panel_count_change()
+        return panel
+
+    def _remove_extra_panel(self) -> None:
+        if not self.extra_panels:
             return
-        seed_txt = self.co_seed.text().strip()
-        fa = self._parse_frac(self.co_fraction_a.currentText(), 0.5)
-        fb = self._parse_frac(self.co_fraction_b.currentText(), 1.0 - fa)
-        # Normalise defensively in case both were edited to sum > 1
-        total = fa + fb
-        if total > 0:
-            fa, fb = fa / total, fb / total
-        self.copolymer_settings_changed.emit({
-            "enabled": True,
-            "fraction_a": fa,
-            "fraction_b": fb,
-            "total": int(self.co_total.value()),
-            "mode": self.co_mode.currentText(),
-            "seed": int(seed_txt) if seed_txt.isdigit() else None,
-        })
+        panel = self.extra_panels.pop()
+        slot = panel.slot
+        self._cop_layout.removeWidget(panel)
+        panel.deleteLater()
+        if slot < self.monomer_table.rowCount():
+            self.monomer_table.removeRow(slot)
+        self._after_panel_count_change()
+
+    def _after_panel_count_change(self) -> None:
+        from ..sequence_patterns import letter
+        n = self.n_copolymer_monomers()
+        self.b_add_monomer.setText(f"+ Add monomer {letter(n)}")
+        self.b_add_monomer.setEnabled(n < 26)
+        self.b_del_monomer.setEnabled(bool(self.extra_panels))
+        if n > 2 and not self.co_fractions_multi.text().strip():
+            self.co_fractions_multi.setText(",".join(["1"] * n))
+        self._push_copolymer_settings()
+
+    def _sync_copolymer_rows(self) -> None:
+        """Show only the inputs the current monomer count and mode use."""
+        form = getattr(self, "_co_form", None)
+        if form is None:
+            return
+        multi = self.n_copolymer_monomers() > 2
+        multiblock = self.co_mode.currentText() == "multiblock"
+        uses_seed = self.co_mode.currentText() in ("random", "gradient")
+        for w, show in ((self._fr_wrap, not multi and not multiblock),
+                        (self.co_fraction_note, not multi and not multiblock),
+                        (self.co_fractions_multi, multi and not multiblock),
+                        (self.co_pattern, multiblock),
+                        (self.co_fill, multiblock)):
+            w.setVisible(show)
+            lbl = form.labelForField(w)
+            if lbl is not None:
+                lbl.setVisible(show)
+        self.co_seed.setEnabled(uses_seed)
+
+    def _fractions(self) -> List[float]:
+        """One normalised mole fraction per copolymer monomer."""
+        n = self.n_copolymer_monomers()
+        if n > 2:
+            vals: List[float] = []
+            for tok in self.co_fractions_multi.text().replace(";", ",").split(","):
+                try:
+                    vals.append(max(0.0, float(tok)))
+                except ValueError:
+                    pass
+            if len(vals) != n or sum(vals) <= 0:
+                vals = [1.0] * n
+        else:
+            fa = self._parse_frac(self.co_fraction_a.currentText(), 0.5)
+            fb = self._parse_frac(self.co_fraction_b.currentText(), 1.0 - fa)
+            vals = [fa, fb]
+        total = sum(vals)
+        return [v / total for v in vals] if total > 0 else [1.0 / n] * n
+
+    def _update_sequence_preview(self, settings: dict) -> None:
+        """Show the chain the current settings build, so a pattern typo or a
+        surprising gradient is visible before anything is built."""
+        if not settings.get("enabled"):
+            self.co_preview.setText("")
+            return
+        from ..chain_builder import _make_sequence
+        from ..sequence_patterns import letter, run_length
+        try:
+            seq = _make_sequence(
+                self.n_copolymer_monomers(), settings["total"],
+                settings["mode"], settings["fractions"], None,
+                settings["seed"], block_pattern=settings["pattern"],
+                block_fill=settings["fill"])
+        except ValueError as exc:
+            self.co_preview.setText(f"⚠ {exc}")
+            return
+        spelled = "".join(letter(i) for i in seq)
+        if len(spelled) > 80:
+            spelled = spelled[:80] + "…"
+        note = ("" if settings["seed"] is not None
+                or settings["mode"] not in ("random", "gradient")
+                else "  (no seed: a new draw at build time)")
+        self.co_preview.setText(f"{run_length(seq, limit=12)}{note}\n{spelled}")
 
     def _on_file_ready(self, path: str, slot: int):
         """Called when either MonomerInputPanel produces a monomer file.
@@ -947,16 +1101,16 @@ class BuilderTab(QWidget):
         if not self.is_copolymer():
             return {"enabled": False}
         seed_txt = self.co_seed.text().strip()
-        fa = self._parse_frac(self.co_fraction_a.currentText(), 0.5)
-        fb = self._parse_frac(self.co_fraction_b.currentText(), 1.0 - fa)
-        total = fa + fb
-        if total > 0:
-            fa, fb = fa / total, fb / total
+        fractions = self._fractions()
         return {
             "enabled": True,
-            "fraction_a": fa,
-            "fraction_b": fb,
+            "fraction_a": fractions[0],
+            "fraction_b": fractions[1],
+            "fractions": fractions,
+            "n_monomers": len(fractions),
             "total": int(self.co_total.value()),
             "mode": self.co_mode.currentText(),
+            "pattern": self.co_pattern.text().strip(),
+            "fill": self.co_fill.currentData() or "repeat",
             "seed": int(seed_txt) if seed_txt.isdigit() else None,
         }

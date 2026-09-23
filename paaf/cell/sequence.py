@@ -23,11 +23,19 @@ Arrangements
     reported rather than hidden.
 
 ``alternating``
-    ABAB… Requires exactly two monomers. Reactivity ratios near zero give
+    ABAB… (ABCABC… with three monomers). Reactivity ratios near zero give
     this.
 
 ``block``
     All of A, then all of B. Block lengths follow the requested fractions.
+
+``gradient``
+    Composition drifts along the chain, A-rich start to B-rich end. Counts
+    follow the fractions exactly; positions are drawn from the seed.
+
+``multiblock``
+    A block configuration you write, e.g. ``AAAAA-BBBB-BBB-AAA`` or
+    ``A5-B4-B3-A3``; see :mod:`paaf.sequence_patterns`.
 
 ``exact``
     You supply the sequence yourself, as a list of monomer indices.
@@ -39,13 +47,15 @@ from typing import List, Optional, Sequence
 
 import numpy as np
 
+from .. import sequence_patterns as patterns
 from ..logging_utils import get_logger
 
 log = get_logger(__name__)
 
 __all__ = ["Monomer", "MonomerSequence", "build_sequence", "ARRANGEMENTS"]
 
-ARRANGEMENTS = ("random", "alternating", "block", "exact")
+ARRANGEMENTS = ("random", "alternating", "block", "gradient", "multiblock",
+                "exact")
 
 
 @dataclass
@@ -132,13 +142,20 @@ class MonomerSequence:
 def build_sequence(monomers: Sequence[Monomer], n_units: int,
                    arrangement: str = "random",
                    seed: int = 0,
-                   exact: Optional[Sequence[int]] = None) -> MonomerSequence:
+                   exact: Optional[Sequence[int]] = None,
+                   pattern: str = "",
+                   fill: str = "repeat",
+                   quiet: bool = False) -> MonomerSequence:
     """Order ``n_units`` repeat units according to ``arrangement``.
 
     Fractions are normalised, so they may be given as percentages, mole
-    fractions or any consistent ratio.
+    fractions or any consistent ratio. ``pattern`` and ``fill`` are the block
+    configuration for ``multiblock``, where letters name monomers in table
+    order and fractions are ignored.
     """
-    mons = [m for m in monomers if m.fraction > 0.0 or arrangement == "exact"]
+    arrangement = (arrangement or "random").lower()
+    keep_all = arrangement in ("exact", "multiblock")
+    mons = [m for m in monomers if m.fraction > 0.0 or keep_all]
     if not mons:
         raise ValueError("No monomer has a non-zero fraction.")
     for m in mons:
@@ -147,7 +164,6 @@ def build_sequence(monomers: Sequence[Monomer], n_units: int,
     if n_units < 1:
         raise ValueError("A chain needs at least one repeat unit.")
 
-    arrangement = (arrangement or "random").lower()
     if arrangement not in ARRANGEMENTS:
         raise ValueError(
             f"arrangement must be one of {ARRANGEMENTS}, not {arrangement!r}")
@@ -156,7 +172,7 @@ def build_sequence(monomers: Sequence[Monomer], n_units: int,
         return MonomerSequence(monomers=list(mons), order=[0] * n_units,
                                arrangement="homopolymer")
 
-    total = sum(m.fraction for m in mons)
+    total = sum(m.fraction for m in mons) or 1.0
     fracs = [m.fraction / total for m in mons]
 
     if arrangement == "exact":
@@ -167,29 +183,18 @@ def build_sequence(monomers: Sequence[Monomer], n_units: int,
             raise ValueError("exact sequence indexes a monomer that does not "
                              "exist.")
     elif arrangement == "alternating":
-        if len(mons) != 2:
-            raise ValueError(
-                f"'alternating' needs exactly two monomers, got {len(mons)}.")
-        order = [i % 2 for i in range(n_units)]
+        order = patterns.alternating_order(len(mons), n_units)
     elif arrangement == "block":
         # Largest remainder, so the blocks sum to exactly n_units and no
         # requested monomer is dropped entirely.
-        ideal = [f * n_units for f in fracs]
-        counts = [max(1, int(np.floor(x))) for x in ideal]
-        deficit = n_units - sum(counts)
-        if deficit > 0:
-            rank = sorted(range(len(mons)),
-                          key=lambda i: ideal[i] - counts[i], reverse=True)
-            for k in range(deficit):
-                counts[rank[k % len(rank)]] += 1
-        while sum(counts) > n_units:
-            i = max(range(len(mons)), key=lambda k: counts[k])
-            if counts[i] <= 1:
-                break
-            counts[i] -= 1
         order = []
-        for i, c in enumerate(counts):
+        for i, c in enumerate(patterns.block_counts(fracs, n_units)):
             order.extend([i] * c)
+    elif arrangement == "gradient":
+        order = patterns.gradient_order(fracs, n_units, seed=seed)
+    elif arrangement == "multiblock":
+        sections = patterns.parse_block_pattern(pattern, len(mons))
+        order = patterns.multiblock_order(sections, n_units, fill)
     else:                                            # random
         rng = np.random.default_rng(seed)
         order = list(rng.choice(len(mons), size=n_units, p=fracs))
@@ -197,5 +202,6 @@ def build_sequence(monomers: Sequence[Monomer], n_units: int,
 
     seq = MonomerSequence(monomers=list(mons), order=order,
                           arrangement=arrangement)
-    log.info("Sequence: %s", seq.describe())
+    if not quiet:
+        log.info("Sequence: %s", seq.describe())
     return seq

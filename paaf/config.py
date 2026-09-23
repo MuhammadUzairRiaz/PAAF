@@ -44,10 +44,15 @@ class OptimizerCfg:
 @dataclass
 class ChainCfg:
     n_monomers: int = 20
-    mode: str = "homopolymer"           # homopolymer|alternating|block|random
+    # homopolymer|alternating|block|random|gradient|multiblock
+    mode: str = "homopolymer"
     fractions: Optional[List[float]] = None
     block_sizes: Optional[List[int]] = None
-    seed: Optional[int] = None
+    # multiblock: sections such as "AAAAA-BBBB-BBB-AAA" or "A5-B4-B3-A3",
+    # letters = monomers in table order; repeated or stretched to n_monomers.
+    block_pattern: Optional[str] = None
+    block_fill: str = "repeat"          # repeat|stretch
+    seed: Optional[int] = None          # same seed → same sequence
     backend: str = "auto"
     # When True, if the monomer's tail heavy atom is a carbonyl carbon
     # (e.g. PBS: [*]OCCCCOC(=O)CCC(=O)[*]) the chain's terminal

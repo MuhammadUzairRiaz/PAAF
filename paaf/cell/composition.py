@@ -65,6 +65,8 @@ class Component:
     monomers: Optional[List[object]] = None      # List[sequence.Monomer]
     arrangement: str = "random"
     sequence_seed: int = 0
+    block_pattern: str = ""             # multiblock only, e.g. "A5-B4-B3-A3"
+    block_fill: str = "repeat"          # multiblock only: repeat | stretch
 
     # Filled in by the solver — never set these by hand.
     unit_mass: float = 0.0              # g/mol per repeat unit (mean)
@@ -81,7 +83,7 @@ class Component:
             for mono in self.monomers:
                 if not mono.mass_amu:
                     mono.resolve()
-            w = [m.fraction for m in self.monomers]
+            w = self._unit_weights()
             wsum = sum(w) or 1.0
             self.unit_mass = sum(m.mass_amu * f
                                  for m, f in zip(self.monomers, w)) / wsum
@@ -93,6 +95,20 @@ class Component:
         self.unit_mass = repeat_unit_mass(self.repeat_unit)
         self.chain_mass = self.unit_mass * int(self.degree_of_polymerisation)
         self.backbone_atoms = backbone_atoms_per_unit(self.repeat_unit)
+
+    def _unit_weights(self) -> List[float]:
+        """How many units of each monomer the chain holds, relatively.
+
+        The fractions, except for a multiblock chain: there the pattern, not
+        the fractions, decides the composition.
+        """
+        if (self.arrangement or "").lower() == "multiblock" and self.block_pattern:
+            from ..sequence_patterns import multiblock_order, parse_block_pattern
+            order = multiblock_order(
+                parse_block_pattern(self.block_pattern, len(self.monomers)),
+                max(1, int(self.degree_of_polymerisation)), self.block_fill)
+            return [float(order.count(i)) for i in range(len(self.monomers))]
+        return [m.fraction for m in self.monomers]
 
     @property
     def beads_per_chain(self) -> int:
@@ -153,7 +169,9 @@ class CellComposition:
                      backbone_atoms=None if c.is_copolymer else c.backbone_atoms,
                      monomers=c.monomers,
                      arrangement=c.arrangement,
-                     sequence_seed=c.sequence_seed)
+                     sequence_seed=c.sequence_seed,
+                     block_pattern=c.block_pattern,
+                     block_fill=c.block_fill)
             for c, n in zip(self.components, self.chain_counts) if n > 0
         ]
 

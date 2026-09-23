@@ -355,6 +355,9 @@ class ComponentRow(QWidget):
         self._ris_key = ""
         self._monomers = None            # List[sequence.Monomer] when copolymer
         self._arrangement = "random"
+        self._sequence_seed = 0          # same seed → same chain sequences
+        self._block_pattern = ""         # multiblock sections, "A5-B4-B3-A3"
+        self._block_fill = "repeat"
 
     def _on_wt(self, _v: float) -> None:
         self.weightEdited.emit(self)
@@ -415,7 +418,12 @@ class ComponentRow(QWidget):
                                  for m in self._monomers)
                 self.info.setText(f"{len(self._monomers)} monomers {pct}%"
                                   f" · {mean:.1f} g/mol")
-                self.info.setToolTip(wrap_tooltip(f"Copolymer, {self._arrangement}. Mean repeat-unit mass "
+                how = self._arrangement
+                if how == "multiblock":
+                    how += f" {self._block_pattern} ({self._block_fill})"
+                elif how in ("random", "gradient"):
+                    how += f", sequence seed {self._sequence_seed}"
+                self.info.setToolTip(wrap_tooltip(f"Copolymer, {how}. Mean repeat-unit mass "
                     f"shown; each chain gets its own sequence, so its exact "
                     f"composition scatters around what you asked for."
                     + ("" if worst <= 2 else
@@ -490,6 +498,9 @@ class ComponentRow(QWidget):
             ris_key=self._guess_ris(smi),
             monomers=self._monomers,
             arrangement=self._arrangement,
+            sequence_seed=int(self._sequence_seed),
+            block_pattern=self._block_pattern,
+            block_fill=self._block_fill,
         )
 
     # ------------------------------------------------------------ copolymer
@@ -501,14 +512,21 @@ class ComponentRow(QWidget):
         treated as a copolymer and every mass read "unreadable"."""
         return bool(self._monomers) and len(self._monomers) > 1
 
-    def set_copolymer(self, monomers, arrangement: str = "random") -> None:
+    def set_copolymer(self, monomers, arrangement: str = "random", *,
+                      seed: int = 0, pattern: str = "",
+                      fill: str = "repeat") -> None:
         """Turn this row into a copolymer (or back into a homopolymer).
 
         The SMILES box shows the first monomer so the row still reads as a
         chemistry, and the readout switches to the blend description.
+        ``seed`` fixes the monomer sequences; ``pattern``/``fill`` are the
+        block configuration of a multiblock arrangement.
         """
         self._monomers = list(monomers) if monomers else None
         self._arrangement = arrangement or "random"
+        self._sequence_seed = int(seed or 0)
+        self._block_pattern = pattern or ""
+        self._block_fill = fill or "repeat"
         if self.is_copolymer:
             self.smiles.setText(self._monomers[0].smiles)
             self.smiles.setEnabled(False)
@@ -521,10 +539,14 @@ class ComponentRow(QWidget):
 
     def _edit_copolymer(self) -> None:
         from .copolymer_dialog import CopolymerDialog
-        dlg = CopolymerDialog(self._monomers, self._arrangement, self)
+        dlg = CopolymerDialog(self._monomers, self._arrangement, self,
+                              seed=self._sequence_seed,
+                              pattern=self._block_pattern,
+                              fill=self._block_fill, dp=int(self.dp.value()))
         if dlg.exec_() != dlg.Accepted:
             return
-        self.set_copolymer(dlg.monomers(), dlg.arrangement())
+        self.set_copolymer(dlg.monomers(), dlg.arrangement(), seed=dlg.seed(),
+                           pattern=dlg.pattern(), fill=dlg.fill())
 
     @staticmethod
     def _guess_ris(smiles: str) -> str:
