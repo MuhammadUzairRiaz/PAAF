@@ -349,8 +349,11 @@ Bonds
     out = lr.replicate_single_chain(single, 2, (30.0, 30.0, 30.0),
                                     tmp_path / "packed.data", use_packmol=False)
     assert "4 atoms" in Path(out).read_text()
-    assert "use_packmol=bool(getattr(cfg.box, \"packmol\", True))" in \
-        (ROOT / "paaf/pipeline.py").read_text()
+    # box.packmol = false in a config selects the grid packer, and the
+    # pipeline hands the chosen packer to the replicator.
+    from paaf.config import BoxCfg
+    assert BoxCfg(packmol=False).packer == "grid"
+    assert "packer=packer" in (ROOT / "paaf/pipeline.py").read_text()
     assert "expand_if_polymer" not in (ROOT / "paaf/cell/grow.py").read_text()
 
 

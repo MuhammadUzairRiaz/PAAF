@@ -136,9 +136,25 @@ def _run(cmd: list, cwd: Path, cancel=None) -> subprocess.CompletedProcess:
     return p
 
 
+def mdrun_command(gmx: str, nprocs: int) -> list:
+    """``gmx mdrun`` on ``nprocs`` cores, the way this build can use them.
+
+    The usual build (thread-MPI) takes ``-nt N`` itself. A real-MPI build
+    (``gmx_mpi``) must be started under ``mpirun -np N`` instead and rejects
+    ``-nt``.
+    """
+    n = max(1, min(int(nprocs or 1), os.cpu_count() or 1))
+    if n > 1 and Path(gmx).name.startswith("gmx_mpi"):
+        mpirun = shutil.which("mpirun") or shutil.which("mpiexec")
+        if mpirun:
+            return [mpirun, "-np", str(n), gmx, "mdrun"]
+        return [gmx, "mdrun"]
+    return [gmx, "mdrun"] + (["-nt", str(n)] if n > 1 else [])
+
+
 def energy_minimise_single_chain(gro_path: Path, top_path: Path,
                                  gmx: Optional[str] = None,
-                                 cancel=None) -> Path:
+                                 cancel=None, nprocs: int = 1) -> Path:
     """Run one steepest-descent minimisation on ``gro_path`` using its
     matching ``top_path``. Returns the path to the minimised .gro."""
     gmx = gmx or _find_gmx()
@@ -157,7 +173,8 @@ def energy_minimise_single_chain(gro_path: Path, top_path: Path,
              cwd=workdir, cancel=cancel)
     if r.returncode != 0:
         raise RuntimeError(f"gmx grompp failed: rc={r.returncode}\n{r.stderr[-600:]}")
-    r = _run([gmx, "mdrun", "-deffnm", "enmin"], cwd=workdir, cancel=cancel)
+    r = _run(mdrun_command(gmx, nprocs) + ["-deffnm", "enmin"],
+             cwd=workdir, cancel=cancel)
     if r.returncode != 0:
         raise RuntimeError(f"gmx mdrun failed: rc={r.returncode}\n{r.stderr[-600:]}")
     return workdir / "enmin.gro"
@@ -334,6 +351,7 @@ def pack_with_gmx_insert(
     gmx: Optional[str] = None,
     out_name: str = "packed_box.gro",
     cancel=None,
+    nprocs: int = 1,
 ) -> GmxPackResult:
     """Fill a box with N copies of ``single_gro`` via ``gmx insert-molecules``.
 
@@ -374,7 +392,8 @@ def pack_with_gmx_insert(
     if pre_minimise and top_file.exists():
         try:
             single_gro = energy_minimise_single_chain(single_gro, top_file, gmx=gmx,
-                                                      cancel=cancel)
+                                                      cancel=cancel,
+                                                      nprocs=nprocs)
             minimised = True
             log.info("Single chain minimised → %s", single_gro)
         except Exception as e:

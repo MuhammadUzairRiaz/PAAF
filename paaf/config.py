@@ -106,12 +106,42 @@ class BoxCfg:
     gmx_target_atoms: int = 0
     gmx_pre_minimise: bool = True
     gmx_try_count: int = 100000
+    # ------------------------------------------------------------------
+    # How many chains, for EVERY packer: when ``target_atoms`` > 0 the chain
+    # count is the nearest whole number of chains to that many atoms, and
+    # ``n_chains`` is ignored. (``gmx_target_atoms`` is the older,
+    # GROMACS-only name for the same thing; an old config's value is read
+    # into this.)
+    target_atoms: int = 0
+    # Which program packs the LAMMPS box:
+    #   "packmol" - packmol (the default, as before)
+    #   "lammps"  - LAMMPS itself: rigid then flexible soft push-off with
+    #               periodic boundaries (paaf.lammps_packer); parallel
+    #   "grid"    - a plain lattice, no overlap removal
+    # The GROMACS box is always packed with gmx insert-molecules.
+    packer: str = "packmol"
+    # Cores for the LAMMPS packer and for GROMACS' pre-insertion
+    # minimisation. How they are used depends on the build — see
+    # paaf.lammps_packer.launch_command.
+    nprocs: int = 4
+    # LAMMPS executable for the LAMMPS packer; empty = auto-detect.
+    lammps_exe: str = ""
+    # Where the LAMMPS packer starts the chains: "random" (anywhere in the
+    # cell, like packmol) or "lattice" (evenly spread, randomly jittered).
+    lammps_placement: str = "random"
 
     # Deprecated but kept for backwards compat with old configs.
     # Old code path stored a 3-tuple in `size`.
     size: List[float] = field(default_factory=lambda: [250.0, 250.0, 250.0])
 
     def __post_init__(self) -> None:
+        if not self.target_atoms and self.gmx_target_atoms:
+            self.target_atoms = int(self.gmx_target_atoms)
+        self.gmx_target_atoms = int(self.target_atoms)
+        # packmol: false in an old config meant the grid packer.
+        if not self.packmol and self.packer == "packmol":
+            self.packer = "grid"
+        self.packer = (self.packer or "packmol").lower()
         # Legacy configs set only `size`; the pipeline reads a/b/c. Map a
         # non-default size onto edges that were left at their defaults.
         try:
@@ -123,6 +153,13 @@ class BoxCfg:
             self.a, self.b, self.c = sz
             if self.shape == "cubic" and len(set(sz)) > 1:
                 self.shape = "orthorhombic"
+
+    def chain_count(self, atoms_per_chain: int) -> int:
+        """Chains to pack: ``n_chains``, or the nearest whole number of
+        chains to ``target_atoms`` when that is set."""
+        if self.target_atoms > 0 and atoms_per_chain > 0:
+            return max(1, int(round(self.target_atoms / atoms_per_chain)))
+        return max(1, int(self.n_chains))
 
 
 @dataclass

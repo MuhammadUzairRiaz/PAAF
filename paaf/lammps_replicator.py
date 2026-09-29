@@ -431,6 +431,11 @@ def replicate_single_chain(
     packmol_path: Optional[str] = None,
     cancel=None,
     use_packmol: bool = True,
+    packer: Optional[str] = None,
+    nprocs: int = 4,
+    lammps_exe: str = "",
+    progress=None,
+    placement: str = "random",
 ) -> Path:
     """Given a single-chain LAMMPS data file, produce packed_box.data
     containing `n_chains` copies packed inside `box_edges` (Å).
@@ -438,19 +443,45 @@ def replicate_single_chain(
     ``box_edges`` is ``(a, b, c)`` or ``(lx, ly, lz, xy, xz, yz)``. With
     non-zero tilts the chains are packed into lx × ly × lz and the header
     carries the ``xy xz yz`` line, so the cell is the requested triclinic one.
+
+    ``packer`` is ``"packmol"``, ``"lammps"`` or ``"grid"``; when omitted,
+    ``use_packmol`` chooses between the first and the last, as it always
+    has. ``"lammps"`` packs with :func:`paaf.lammps_packer.lammps_pack` on
+    ``nprocs`` cores, into the true (possibly triclinic) periodic cell; its
+    input and log stay in ``lammps_pack/`` next to the output.
     """
+    if packer is None:
+        packer = "packmol" if use_packmol else "grid"
+    packer = packer.lower()
+    use_packmol = packer == "packmol"
     box_edges = tuple(float(x) for x in box_edges)
+    full_box = box_edges
     tilt = box_edges[3:6] if len(box_edges) >= 6 else (0.0, 0.0, 0.0)
     box_edges = box_edges[:3]
     single_data_file = Path(single_data_file).resolve()
     out_data_file = Path(out_data_file).resolve()
+
+    coords = None
+    if packer == "lammps":
+        from .lammps_packer import lammps_pack
+        res = lammps_pack(single_data_file, n_chains, full_box,
+                          tolerance=tolerance, seed=seed, nprocs=nprocs,
+                          lammps_exe=lammps_exe, placement=placement,
+                          work_dir=out_data_file.parent / "lammps_pack",
+                          cancel=cancel, progress=progress)
+        coords = [tuple(c) for c in res.coords]
+    elif packer not in ("packmol", "grid"):
+        raise ValueError(f"Unknown packer {packer!r}: use packmol, lammps "
+                         f"or grid.")
+
     work = Path(tempfile.mkdtemp(prefix="paaf_pack_"))
     single_pdb = work / "single_chain.pdb"
-    _write_pdb_from_data(single_data_file, single_pdb)
-
     packed_pdb = work / "packed.pdb"
     _used_packmol = False
-    if use_packmol:
+    if coords is not None:
+        pass
+    elif use_packmol:
+        _write_pdb_from_data(single_data_file, single_pdb)
         _used_packmol = _pack_with_packmol(
             single_pdb, n_chains, box_edges, packed_pdb,
             tolerance=tolerance, seed=seed, packmol_path=packmol_path,
@@ -458,8 +489,9 @@ def replicate_single_chain(
     else:
         log.info("packmol switched off (box.packmol = false): packing with "
                  "the deterministic grid packer.")
+        _write_pdb_from_data(single_data_file, single_pdb)
         _pack_grid(single_pdb, n_chains, box_edges, packed_pdb, seed=seed)
-    if use_packmol and not _used_packmol:
+    if coords is None and use_packmol and not _used_packmol:
         # If a packmol binary WAS found but the run failed, that's a hard
         # error the user needs to see (bad tolerance, tiny box, corrupt PDB,
         # unrecognised keyword) — surface the tail of packmol.log so they
@@ -486,10 +518,11 @@ def replicate_single_chain(
         log.warning("and set the path on the Box page.")
         log.warning("=" * 70)
         _pack_grid(single_pdb, n_chains, box_edges, packed_pdb, seed=seed)
-    elif use_packmol:
+    elif coords is None and use_packmol:
         log.info("PACKED via packmol (random layout).")
 
-    coords = _read_xyz_or_pdb_coords(packed_pdb)
+    if coords is None:
+        coords = _read_xyz_or_pdb_coords(packed_pdb)
 
     header, sections = parse_lammps_data(single_data_file)
     atoms_orig = _clean(sections.get("Atoms"))
@@ -509,7 +542,8 @@ def replicate_single_chain(
     n_imp_final = len(topo_orig["Impropers"]) * n_chains
 
     out_lines: List[str] = []
-    out_lines.append(f"LAMMPS data — {n_chains} chains packed by PAAF")
+    out_lines.append(f"LAMMPS data — {n_chains} chains packed by PAAF "
+                     f"({packer})")
     out_lines.append("")
     out_lines.append(f"{n_atoms_final} atoms")
     if n_bonds_final: out_lines.append(f"{n_bonds_final} bonds")

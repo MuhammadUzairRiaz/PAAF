@@ -134,6 +134,45 @@ def run_pipeline(cfg: Config, progress: Optional[Callable[[str], None]] = None,
     return result
 
 
+def _atoms_in_data(path: Path) -> int:
+    """The ``N atoms`` header count of a LAMMPS data file, or 0."""
+    from .lammps_replicator import _header_count, parse_lammps_data
+    try:
+        header, _ = parse_lammps_data(Path(path))
+    except OSError:
+        return 0
+    return _header_count(header, "atoms")
+
+
+_PACKER_LABEL = {"packmol": "packmol (falls back to grid)",
+                 "lammps": "LAMMPS soft packing",
+                 "grid": "the grid packer (no overlap removal)"}
+
+
+def _pack_lammps_box(cfg: Config, single_data: Path, box_shape, out_data: Path,
+                     cancel, _p) -> Path:
+    """Pack the single-chain data file into the box with the chosen packer."""
+    from .lammps_replicator import replicate_single_chain
+    box = cfg.box
+    per = _atoms_in_data(single_data)
+    n = box.chain_count(per)
+    if box.target_atoms > 0 and per:
+        _p(f"[replicator] Target {box.target_atoms} atoms with {per}-atom "
+           f"chains → {n} chains = {n * per} atoms "
+           f"({n * per - box.target_atoms:+d}).")
+    packer = (box.packer or "packmol").lower()
+    _p(f"[replicator] Packing {n} chains into box ({box_shape.a:.1f} × "
+       f"{box_shape.b:.1f} × {box_shape.c:.1f} Å) via "
+       f"{_PACKER_LABEL.get(packer, packer)}")
+    return replicate_single_chain(
+        single_data, n, box_shape.lammps_params(), out_data,
+        packmol_path=box.packmol_path or None,
+        seed=int(box.packmol_seed), tolerance=float(box.packmol_tolerance),
+        packer=packer, nprocs=int(box.nprocs), lammps_exe=box.lammps_exe,
+        placement=box.lammps_placement,
+        cancel=cancel, progress=_p)
+
+
 def _pipeline_workload(cfg: Config) -> dict:
     """The inputs that set a pipeline run's cost (hashed into workload_id)."""
     box = cfg.box
@@ -150,6 +189,9 @@ def _pipeline_workload(cfg: Config) -> dict:
         "optimizer": (f"{cfg.optimizer.ff} {cfg.optimizer.steps} steps"
                       if cfg.optimizer.enabled else "off"),
         "packmol": bool(box.packmol),
+        "packer": box.packer,
+        "nprocs": box.nprocs,
+        "target_atoms": box.target_atoms,
         "blend_components": (len(cfg.blend.components)
                              if cfg.blend.enabled else 0),
     }
@@ -417,7 +459,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
        f"{box_shape.c:.1f} Å ({box_shape.shape})")
     try:
         _n_for_density = max(int(cfg.box.n_chains), 1)
-        _tgt = int(getattr(cfg.box, "gmx_target_atoms", 0))
+        _tgt = int(getattr(cfg.box, "target_atoms", 0))
         if _tgt > 0 and len(chain.atoms) > 0:
             _n_for_density = max(_n_for_density,
                                  round(_tgt / len(chain.atoms)))
@@ -487,7 +529,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
     # moltemplate is run on ONE chain; the N-chain box is then packed with
     # packmol from that single-chain data file (same replicator as the
     # DL_FIELD route). `new X[N].move(...)` would only line the copies up.
-    _n_chains_mt = int(cfg.box.n_chains)
+    _n_chains_mt = cfg.box.chain_count(len(chain.atoms))
     _pack_after_mt = (ff.kind != "dlfield" and _n_chains_mt > 1)
     if ff.kind != "dlfield":
         _p("Writing Moltemplate files")
@@ -502,8 +544,9 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
             name="system", ff=ff,
         )
         if _pack_after_mt:
-            _p(f"system.lt holds ONE chain; {_n_chains_mt} copies will be "
-               f"packed into the box with packmol after moltemplate runs.")
+            _p(f"system.lt holds ONE chain; about {_n_chains_mt} copies will "
+               f"be packed into the box with {cfg.box.packer} after "
+               f"moltemplate runs.")
     else:
         _p("DL_FIELD path — skipping Moltemplate .lt scaffolding "
            "(dl_field will build the topology directly).")
@@ -686,7 +729,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
             # If the user asked for more than 1 chain, replicate the single-
             # chain lammps data into an N-chain packed box (packmol-based,
             # non-hybrid, ported from create_box_lammps_nonhybrid_chains.py).
-            n_chains_wanted = int(cfg.box.n_chains)
+            n_chains_wanted = cfg.box.chain_count(len(chain.atoms))
             if n_chains_wanted > 1 and cfg.engine in ("lammps", "both"):
                 _stage(7, f"Packing {n_chains_wanted} chains into the box")
                 single_data = None
@@ -697,20 +740,9 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                 if single_data is None:
                     _p(f"[replicator] no single-chain data file found — skipping packing")
                 else:
-                    _p(f"[replicator] Packing {n_chains_wanted} chains into "
-                       f"box ({box_shape.a:.1f} × {box_shape.b:.1f} × "
-                       f"{box_shape.c:.1f} Å) via packmol (falls back to grid)")
-                    from .lammps_replicator import replicate_single_chain
-                    packed_data = replicate_single_chain(
-                        single_data, n_chains_wanted,
-                        box_shape.lammps_params(),
-                        out_dir / "packed_box.data",
-                        packmol_path=getattr(cfg.box, "packmol_path", "") or None,
-                        seed=int(getattr(cfg.box, "packmol_seed", -1)),
-                        tolerance=float(getattr(cfg.box, "packmol_tolerance", 2.0)),
-                        use_packmol=bool(getattr(cfg.box, "packmol", True)),
-                        cancel=cancel,
-                    )
+                    packed_data = _pack_lammps_box(
+                        cfg, single_data, box_shape,
+                        out_dir / "packed_box.data", cancel, _p)
                     _p(f"[replicator] Wrote {packed_data}")
                     dlfield_result.outputs = sorted(
                         set(list(dlfield_result.outputs) + [packed_data]), key=str)
@@ -720,7 +752,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
             # replicator (they operate on lammps.data). Instead, run
             # `gmx insert-molecules` on the dl_field-produced .gro, using
             # either an explicit chain count or a target atom count.
-            gmx_target_atoms = int(getattr(cfg.box, "gmx_target_atoms", 0))
+            gmx_target_atoms = int(getattr(cfg.box, "target_atoms", 0))
             _need_gmx_pack = (cfg.engine in ("gromacs", "both") and
                               (n_chains_wanted > 1 or gmx_target_atoms > 0))
             if _need_gmx_pack:
@@ -752,6 +784,7 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                             atom_limit=(gmx_target_atoms if gmx_target_atoms > 0 else None),
                             try_count=int(getattr(cfg.box, "gmx_try_count", 100000)),
                             pre_minimise=bool(getattr(cfg.box, "gmx_pre_minimise", True)),
+                            nprocs=int(getattr(cfg.box, "nprocs", 4)),
                             cancel=cancel,
                         )
                         _p(f"[gmx-pack] Inserted {gmx_result.n_inserted} copies → "
@@ -914,20 +947,9 @@ def _run_pipeline_body(cfg: Config, _p, _stage, _check, cancel) -> dict:
                             list(_hyb.bead_masses), _p)
                 if _pack_after_mt and data_file and Path(data_file).exists():
                     _stage(7, f"Packing {_n_chains_mt} chains into the box")
-                    _p(f"[replicator] Packing {_n_chains_mt} chains into box "
-                       f"({box_shape.a:.1f} × {box_shape.b:.1f} × "
-                       f"{box_shape.c:.1f} Å) via packmol (falls back to grid)")
-                    from .lammps_replicator import replicate_single_chain
-                    packed_data = replicate_single_chain(
-                        Path(data_file), _n_chains_mt,
-                        box_shape.lammps_params(),
-                        out_dir / "packed_box.data",
-                        packmol_path=getattr(cfg.box, "packmol_path", "") or None,
-                        seed=int(getattr(cfg.box, "packmol_seed", -1)),
-                        tolerance=float(getattr(cfg.box, "packmol_tolerance", 2.0)),
-                        use_packmol=bool(getattr(cfg.box, "packmol", True)),
-                        cancel=cancel,
-                    )
+                    packed_data = _pack_lammps_box(
+                        cfg, Path(data_file), box_shape,
+                        out_dir / "packed_box.data", cancel, _p)
                     _p(f"[replicator] Wrote {packed_data} "
                        f"(run.in reads this file; system.data is the single chain)")
                     data_file = packed_data

@@ -999,9 +999,58 @@ class MainWindow(QMainWindow):
         self.box_shape = QComboBox()
         self.box_shape.addItems(["cubic", "orthorhombic", "triclinic"])
         self.box_shape.currentTextChanged.connect(self._on_box_shape_changed)
+        fs.addRow("Box shape", self.box_shape)
+        v.addWidget(gb_shape)
+
+        # ---------- How many chains (every packer) ---------------------
+        gb_n = QGroupBox("Chains in the box")
+        fn = QFormLayout(gb_n)
+        self.chains_mode = QComboBox()
+        self.chains_mode.addItem("Number of chains", "chains")
+        self.chains_mode.addItem("Fill to a target atom count", "atoms")
+        self.chains_mode.setToolTip(wrap_tooltip(
+            "Insert a set number of chains, or give a total atom count and "
+            "let PAAF insert the nearest whole number of chains to it "
+            "(chains = target atoms ÷ atoms per chain). Works with every "
+            "packer — packmol, LAMMPS and GROMACS."))
+        self.chains_mode.currentIndexChanged.connect(self._on_chains_mode_changed)
         self.n_chains = QSpinBox(); self.n_chains.setRange(1, 100000); self.n_chains.setValue(1)
-        self.box_packmol = QCheckBox("Use packmol / mbuild if available (recommended)")
-        self.box_packmol.setChecked(True)
+        self.box_target_atoms = QSpinBox()
+        self.box_target_atoms.setRange(1, 50_000_000)
+        self.box_target_atoms.setValue(50000)
+        self.box_target_atoms.setGroupSeparatorShown(False)
+        fn.addRow("Chains via", self.chains_mode)
+        fn.addRow("Number of chains", self.n_chains)
+        fn.addRow("Target atoms", self.box_target_atoms)
+        v.addWidget(gb_n)
+
+        # ---------- Packing ------------------------------------------------
+        gb_pack = QGroupBox("Packing")
+        fp = QFormLayout(gb_pack)
+        self._box_pack_form = fp
+        self.box_packer = QComboBox()
+        self.box_packer.addItem("Packmol", "packmol")
+        self.box_packer.addItem("LAMMPS — soft packing, periodic, parallel", "lammps")
+        self.box_packer.addItem("Simple grid — no overlap removal", "grid")
+        self.box_packer.setToolTip(wrap_tooltip(
+            "Packmol: the classic packer. One core, no periodic boundaries, and "
+            "it can take a very long time on long chains.\n\n"
+            "LAMMPS: places the chains, pushes them apart as rigid bodies, then "
+            "finishes with a short flexible push-off (bonds, angles and "
+            "torsions held at their built values). Periodic boundaries, "
+            "several cores, fixed step budget, so it always finishes. The "
+            "log reports the closest remaining contact."))
+        self.box_packer.currentIndexChanged.connect(
+            lambda _i: self._sync_packing_rows())
+        self.box_nprocs = QSpinBox()
+        self.box_nprocs.setRange(1, 256); self.box_nprocs.setValue(4)
+        self.box_nprocs.setToolTip(wrap_tooltip(
+            "Cores for the LAMMPS packer and for the GROMACS pre-insertion "
+            "minimisation. LAMMPS: mpirun -np N on an MPI build, N OpenMP "
+            "threads on an OpenMP build, one core otherwise (the log says "
+            "which). GROMACS: mdrun -nt N. packmol and gmx insert-molecules "
+            "themselves only use one core."))
+
         # ---- Packmol binary path (editable, auto-filled, persisted)
         self.box_packmol_path = QLineEdit()
         self.box_packmol_path.setPlaceholderText(
@@ -1013,9 +1062,20 @@ class MainWindow(QMainWindow):
         b_browse_pk.clicked.connect(self._browse_packmol)
         self.box_packmol_path.editingFinished.connect(self._save_packmol_setting)
         pk_row = QHBoxLayout(); pk_row.addWidget(self.box_packmol_path); pk_row.addWidget(b_browse_pk)
-        pk_wrap = QWidget(); pk_wrap.setLayout(pk_row)
+        pk_row.setContentsMargins(0, 0, 0, 0)
+        self._pk_wrap = QWidget(); self._pk_wrap.setLayout(pk_row)
 
-        # Packmol seed — same semantics as the Blend page.
+        # ---- LAMMPS binary for the LAMMPS packer
+        self.box_lammps_exe = QLineEdit()
+        self.box_lammps_exe.setPlaceholderText(
+            "lmp / lmp_mpi (auto-detected if empty)")
+        b_browse_lmp = QPushButton("Browse...")
+        b_browse_lmp.clicked.connect(self._browse_box_lammps)
+        lmp_row = QHBoxLayout(); lmp_row.addWidget(self.box_lammps_exe); lmp_row.addWidget(b_browse_lmp)
+        lmp_row.setContentsMargins(0, 0, 0, 0)
+        self._lmp_wrap = QWidget(); self._lmp_wrap.setLayout(lmp_row)
+
+        # Seed — same semantics as the Blend page, for packmol and LAMMPS.
         self.box_packmol_seed = QSpinBox()
         self.box_packmol_seed.setRange(-1, 2_000_000_000)
         self.box_packmol_seed.setValue(-1)
@@ -1027,58 +1087,60 @@ class MainWindow(QMainWindow):
             "Any positive integer (e.g. 20) = fixed seed → identical packing every run."
             "</span>")
         _seed_note.setWordWrap(True)
+        self._box_seed_note = _seed_note
 
-        # Packmol tolerance — same knob the Blend page exposes.
+        # Tolerance — same knob the Blend page exposes.
         self.box_packmol_tol = QDoubleSpinBox()
         self.box_packmol_tol.setRange(0.5, 10.0); self.box_packmol_tol.setSingleStep(0.1)
         self.box_packmol_tol.setDecimals(2); self.box_packmol_tol.setValue(2.0)
-        self.box_packmol_tol.setToolTip(wrap_tooltip("Minimum distance (Å) between atoms of different molecules. "
-            "2.0 is safe for polymers; 1.5 packs tighter."))
+        self.box_packmol_tol.setToolTip(wrap_tooltip("Minimum distance (Å) between atoms of different chains, "
+            "for packmol and the LAMMPS packer. 2.0 is safe for polymers; "
+            "1.5 packs tighter."))
 
-        fs.addRow("Number of chains", self.n_chains)
-        fs.addRow("Box shape", self.box_shape)
-        fs.addRow(self.box_packmol)
-        fs.addRow("Packmol binary", pk_wrap)
-        fs.addRow("Packmol seed", self.box_packmol_seed)
-        fs.addRow("", _seed_note)
-        fs.addRow("Packmol tolerance (Å)", self.box_packmol_tol)
-        v.addWidget(gb_shape)
+        fp.addRow("Pack LAMMPS box with", self.box_packer)
+        fp.addRow("CPU cores", self.box_nprocs)
+        fp.addRow("Packmol binary", self._pk_wrap)
+        fp.addRow("LAMMPS binary", self._lmp_wrap)
+        self.box_placement = QComboBox()
+        self.box_placement.addItem("Random — anywhere in the box, like packmol", "random")
+        self.box_placement.addItem("Lattice — evenly spread, randomly jittered", "lattice")
+        self.box_placement.setToolTip(wrap_tooltip(
+            "Where the LAMMPS packer starts each chain before pushing them "
+            "apart. Orientations are random either way. Random matches "
+            "packmol; lattice starts with fewer overlaps."))
+        fp.addRow("Start chains at", self.box_placement)
+        fp.addRow("Seed", self.box_packmol_seed)
+        fp.addRow("", _seed_note)
+        fp.addRow("Min. distance between chains (Å)", self.box_packmol_tol)
+        v.addWidget(gb_pack)
 
         # ---------- GROMACS-native packing (visible when engine=gromacs) ---
-        # Instead of packmol, use 'gmx insert-molecules' with either an
-        # explicit chain count OR a target atom limit (matches user's
-        # create_box.py workflow).
+        # 'gmx insert-molecules' with the chain count or target atom count
+        # chosen above (matches the user's create_box.py workflow).
         self.gb_gmx = QGroupBox("GROMACS packing (gmx insert-molecules)")
         gg = QFormLayout(self.gb_gmx); gg.setContentsMargins(8, 8, 8, 8); gg.setSpacing(6)
-        self.gmx_mode = QComboBox()
-        self.gmx_mode.addItems(["Explicit chain count", "Target atom count"])
-        self.gmx_mode.currentIndexChanged.connect(self._on_gmx_mode_changed)
-        self.gmx_target_atoms = QSpinBox()
-        self.gmx_target_atoms.setRange(0, 10_000_000); self.gmx_target_atoms.setValue(50000)
-        self.gmx_target_atoms.setToolTip(wrap_tooltip("Pipeline computes n_chains = target_atoms // atoms_per_chain "
-            "(exact same rule as your create_box.py script)."))
         self.gmx_pre_min = QCheckBox("Energy-minimise single chain before insertion")
         self.gmx_pre_min.setChecked(True)
-        self.gmx_pre_min.setToolTip(wrap_tooltip("Runs `gmx grompp + mdrun` with a steepest-descent enmin.mdp on "
-            "the single chain first, so chains aren't sterically strained "
-            "before insert-molecules starts placing copies."))
+        self.gmx_pre_min.setToolTip(wrap_tooltip("Runs `gmx grompp + mdrun` (on the CPU cores set above) with a "
+            "steepest-descent enmin.mdp on the single chain first, so chains "
+            "aren't sterically strained before insert-molecules starts "
+            "placing copies."))
         self.gmx_try = QSpinBox()
         self.gmx_try.setRange(100, 10_000_000); self.gmx_try.setValue(100000)
         self.gmx_try.setToolTip(wrap_tooltip("gmx insert-molecules -try N (default 100000)"))
-        gg.addRow("Chains via", self.gmx_mode)
-        gg.addRow("Target atoms", self.gmx_target_atoms)
         gg.addRow("", self.gmx_pre_min)
         gg.addRow("Try count", self.gmx_try)
         _gmx_note = QLabel(
-            "Only used when <b>MD engine output</b> is set to <tt>gromacs</tt> "
-            "on the Force-field or Export page. Requires <tt>gmx</tt> or "
-            "<tt>gmx_mpi</tt> on your PATH.")
+            "Used when <b>MD engine output</b> is <tt>gromacs</tt> or "
+            "<tt>both</tt>. Inserts the chain count or target atom count "
+            "chosen above. <tt>insert-molecules</tt> itself runs on one core; "
+            "the minimisation uses the CPU cores above. Requires "
+            "<tt>gmx</tt> or <tt>gmx_mpi</tt>.")
         _gmx_note.setWordWrap(True); _gmx_note.setProperty("role", "hint")
         gg.addRow("", _gmx_note)
         v.addWidget(self.gb_gmx)
-        # Initialise visibility to match current engine choice.
+        self._on_chains_mode_changed(0)
         self._sync_gmx_visibility()
-        self._on_gmx_mode_changed(0)
 
         # ---------- Dimensions
         gb_dim = QGroupBox("Cell edge lengths (Å)")
@@ -1386,21 +1448,52 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------ FF handlers
     # ---- GROMACS-packing visibility / mode helpers
     def _sync_gmx_visibility(self) -> None:
-        """Show the GROMACS packing group only when engine is gromacs or both.
-        Also hide the packmol-related rows when we're in gromacs-only mode."""
+        """Show each engine's packing controls only when that engine's files
+        are being written: the GROMACS group for gromacs/both, the LAMMPS
+        packer choice for lammps/both."""
         if not hasattr(self, "gb_gmx"):
             return
         engine = self.engine_combo.currentText() if hasattr(self, "engine_combo") else "lammps"
         self.gb_gmx.setVisible(engine in ("gromacs", "both"))
+        self._sync_packing_rows()
 
-    def _on_gmx_mode_changed(self, _idx: int) -> None:
-        """Enable the target-atoms spinbox only when Target-atoms mode is picked."""
-        if not hasattr(self, "gmx_target_atoms"):
+    def _sync_packing_rows(self) -> None:
+        """Show only the rows the chosen packer and engine actually use."""
+        if not hasattr(self, "_box_pack_form"):
             return
-        target_mode = self.gmx_mode.currentIndex() == 1
-        self.gmx_target_atoms.setEnabled(target_mode)
-        if hasattr(self, "n_chains"):
-            self.n_chains.setEnabled(not target_mode)
+        engine = self.engine_combo.currentText() if hasattr(self, "engine_combo") else "lammps"
+        lammps_out = engine in ("lammps", "both")
+        gmx_out = engine in ("gromacs", "both")
+        packer = self.box_packer.currentData() if lammps_out else None
+        f = self._box_pack_form
+        def show(w, on):
+            # QFormLayout.setRowVisible is Qt >= 6.4; hide field and label.
+            w.setVisible(bool(on))
+            lbl = f.labelForField(w)
+            if lbl is not None:
+                lbl.setVisible(bool(on))
+        show(self.box_packer, lammps_out)
+        show(self.box_nprocs, packer == "lammps" or gmx_out)
+        show(self._pk_wrap, packer == "packmol")
+        show(self._lmp_wrap, packer == "lammps")
+        show(self.box_placement, packer == "lammps")
+        show(self.box_packmol_seed, packer in ("packmol", "lammps", "grid"))
+        show(self._box_seed_note, packer in ("packmol", "lammps", "grid"))
+        show(self.box_packmol_tol, packer in ("packmol", "lammps"))
+
+    def _on_chains_mode_changed(self, _idx: int) -> None:
+        """Chain count or target atom count: enable only the one in use."""
+        if not hasattr(self, "box_target_atoms"):
+            return
+        target_mode = self.chains_mode.currentData() == "atoms"
+        self.box_target_atoms.setEnabled(target_mode)
+        self.n_chains.setEnabled(not target_mode)
+
+    def _browse_box_lammps(self) -> None:
+        p, _ = QFileDialog.getOpenFileName(self, "Select LAMMPS executable",
+                                           str(Path.home()))
+        if p:
+            self.box_lammps_exe.setText(p)
 
     def _sync_ff_engine_from_export(self, engine: str) -> None:
         """Called when the Export page changes its engine — mirror it on the
@@ -1839,15 +1932,18 @@ class MainWindow(QMainWindow):
                 gamma=self.box_gamma.value(),
                 use_density=self.box_use_density.isChecked(),
                 density_g_cm3=self.box_density.value(),
-                packmol=self.box_packmol.isChecked(),
+                packmol=self.box_packer.currentData() != "grid",
+                packer=self.box_packer.currentData() or "packmol",
+                nprocs=int(self.box_nprocs.value()),
+                lammps_exe=self.box_lammps_exe.text().strip(),
+                lammps_placement=self.box_placement.currentData() or "random",
                 packmol_path=self.box_packmol_path.text().strip(),
                 packmol_seed=int(self.box_packmol_seed.value()),
                 packmol_tolerance=float(self.box_packmol_tol.value()),
-                # GROMACS-native packing (only used when engine=gromacs/both)
-                gmx_target_atoms=(int(self.gmx_target_atoms.value())
-                                  if hasattr(self, "gmx_mode")
-                                     and self.gmx_mode.currentIndex() == 1
-                                  else 0),
+                # Chain count OR target atom count, for every packer
+                target_atoms=(int(self.box_target_atoms.value())
+                              if self.chains_mode.currentData() == "atoms"
+                              else 0),
                 gmx_pre_minimise=bool(getattr(self, "gmx_pre_min",
                                               None) and self.gmx_pre_min.isChecked()),
                 gmx_try_count=(int(self.gmx_try.value())
@@ -1942,7 +2038,21 @@ class MainWindow(QMainWindow):
         self.box_gamma.setValue(getattr(cfg.box, "gamma", 90.0))
         self.box_use_density.setChecked(getattr(cfg.box, "use_density", False))
         self.box_density.setValue(getattr(cfg.box, "density_g_cm3", 1.0))
-        self.box_packmol.setChecked(getattr(cfg.box, "packmol", True))
+        _i = self.box_packer.findData(getattr(cfg.box, "packer", "packmol"))
+        self.box_packer.setCurrentIndex(max(0, _i))
+        self.box_nprocs.setValue(int(getattr(cfg.box, "nprocs", 4)))
+        self.box_lammps_exe.setText(getattr(cfg.box, "lammps_exe", "") or "")
+        self.box_placement.setCurrentIndex(max(0, self.box_placement.findData(
+            getattr(cfg.box, "lammps_placement", "random"))))
+        self.box_packmol_seed.setValue(int(getattr(cfg.box, "packmol_seed", -1)))
+        self.box_packmol_tol.setValue(float(getattr(cfg.box, "packmol_tolerance", 2.0)))
+        _tgt = int(getattr(cfg.box, "target_atoms", 0))
+        self.chains_mode.setCurrentIndex(
+            self.chains_mode.findData("atoms" if _tgt > 0 else "chains"))
+        if _tgt > 0:
+            self.box_target_atoms.setValue(_tgt)
+        self.gmx_pre_min.setChecked(bool(getattr(cfg.box, "gmx_pre_minimise", True)))
+        self.gmx_try.setValue(int(getattr(cfg.box, "gmx_try_count", 100000)))
         _cfg_pk = getattr(cfg.box, "packmol_path", "")
         if _cfg_pk:
             self.box_packmol_path.setText(_cfg_pk)

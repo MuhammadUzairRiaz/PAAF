@@ -109,8 +109,9 @@ def test_pipeline_moltemplate_route_writes_single_chain_then_packs():
     for sys_lt in calls["write_system_lt"]:
         kw = {k.arg: k.value for k in sys_lt.keywords}
         assert isinstance(kw["n_chains"], ast.Constant) and kw["n_chains"].value == 1
-    # replicate_single_chain is called twice: DL_FIELD route and moltemplate route
-    assert len(calls["replicate_single_chain"]) == 2
+    # Both routes pack: DL_FIELD and moltemplate each call _pack_lammps_box,
+    # which runs replicate_single_chain with the chosen packer.
+    assert len(calls["_pack_lammps_box"]) == 2
     assert "run_moltemplate" in calls
     inp = calls["write_lammps_input"][0]
     kws = {k.arg for k in inp.keywords}
