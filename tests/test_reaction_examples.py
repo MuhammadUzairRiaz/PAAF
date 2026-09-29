@@ -16,7 +16,14 @@ pytest.importorskip("rdkit", reason="validation requires RDKit")
 from paaf.reaction_examples import CATEGORIES, EXAMPLES, by_category
 from paaf.reaction_smiles import validate_scheme
 
-logging.disable(logging.CRITICAL)
+
+@pytest.fixture(autouse=True, scope="module")
+def _quiet_logging():
+    """Silence the validator's chatter here only; restore it for later modules."""
+    previous = logging.root.manager.disable
+    logging.disable(logging.CRITICAL)
+    yield
+    logging.disable(previous)
 
 
 def test_there_are_more_than_fifty_examples():
