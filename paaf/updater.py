@@ -445,8 +445,8 @@ def relaunch() -> str:
     _write_log("relaunching: " + " ".join(args))
     try:
         sys.stdout.flush(); sys.stderr.flush()
-    except Exception:
-        pass
+    except Exception as exc:
+        _write_log(f"could not flush output before restarting ({exc})")
     try:
         os.execv(sys.executable, args)
     except Exception as exc:

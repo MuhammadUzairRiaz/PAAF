@@ -33,3 +33,13 @@ def _no_modal_message_boxes(monkeypatch):
         monkeypatch.setattr(QMessageBox, name,
                             staticmethod(lambda *a, _r=answer, **k: _r))
     yield
+
+
+@pytest.fixture(autouse=True)
+def _restore_logging_disable():
+    """A test that calls logging.disable(...) must not silence every later
+    test: records the run log, console and caplog assertions rely on."""
+    import logging
+    previous = logging.root.manager.disable
+    yield
+    logging.disable(previous)

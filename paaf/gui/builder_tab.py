@@ -77,6 +77,10 @@ class MonomerInputPanel(QWidget):
 
     file_ready = pyqtSignal(str, int)     # path, slot
     log = pyqtSignal(str)
+    # The user added, edited or removed one of their own polymers here. The
+    # Builder passes the fresh library to every other panel, so a polymer
+    # added under Homopolymer is also listed under Monomer A, B, C…
+    library_changed = pyqtSignal()
 
     def __init__(self, slot: int, title: str,
                  all_polymers: list, all_fragments: list,
@@ -321,12 +325,34 @@ class MonomerInputPanel(QWidget):
         reload_library()
         self._all_polymers = list_library("all")
         self._apply_filter()
-        if select_pid:
-            for row in range(self.lib_table.rowCount()):
-                item = self.lib_table.item(row, 0)
-                if item and item.text() == select_pid:
-                    self.lib_table.selectRow(row)
-                    break
+        self._select_pid(select_pid)
+        self.library_changed.emit()
+
+    def set_polymers(self, polymers: list) -> None:
+        """Show a library another panel changed, keeping this panel's state.
+
+        The row that was selected stays selected, but quietly: selecting a
+        row fills in its SMILES, and this panel's SMILES may since have been
+        edited by hand.
+        """
+        keep = self._selected_pid()
+        self._all_polymers = polymers
+        self.lib_table.blockSignals(True)
+        try:
+            self._apply_filter()
+            self._select_pid(keep)
+        finally:
+            self.lib_table.blockSignals(False)
+        self._refresh_custom_buttons()
+
+    def _select_pid(self, pid: Optional[str]) -> None:
+        if not pid:
+            return
+        for row in range(self.lib_table.rowCount()):
+            item = self.lib_table.item(row, 0)
+            if item and item.text() == pid:
+                self.lib_table.selectRow(row)
+                break
 
     def _custom_dialog(self, title: str, pid="", smiles="", name=""):
         """Ask for id, name and SMILES. Returns the tuple or ``None``."""
@@ -706,6 +732,7 @@ class BuilderTab(QWidget):
         self.panel_solo = MonomerInputPanel(0, "Monomer", polymers, fragments)
         self.panel_solo.file_ready.connect(self._on_file_ready)
         self.panel_solo.log.connect(self.log.emit)
+        self.panel_solo.library_changed.connect(self._on_library_changed)
         hv.addWidget(self.panel_solo)
         # Absorb any extra vertical space so the panel stays at the top
         # of the stack page instead of getting pushed down.
@@ -719,11 +746,13 @@ class BuilderTab(QWidget):
         self.panel_a = MonomerInputPanel(0, "Monomer A", polymers, fragments)
         self.panel_a.file_ready.connect(self._on_file_ready)
         self.panel_a.log.connect(self.log.emit)
+        self.panel_a.library_changed.connect(self._on_library_changed)
         cv.addWidget(self.panel_a)
 
         self.panel_b = MonomerInputPanel(1, "Monomer B", polymers, fragments)
         self.panel_b.file_ready.connect(self._on_file_ready)
         self.panel_b.log.connect(self.log.emit)
+        self.panel_b.library_changed.connect(self._on_library_changed)
         cv.addWidget(self.panel_b)
 
         # Multi-component copolymers: Monomer C, D, … are added on demand
@@ -934,6 +963,23 @@ class BuilderTab(QWidget):
         self._update_sequence_preview(settings)
         self.copolymer_settings_changed.emit(settings)
 
+    def _on_library_changed(self) -> None:
+        """One panel changed the user's polymers; show it in all of them.
+
+        Each panel keeps its own copy of the library list, so without this a
+        polymer added under Homopolymer did not appear under Monomer A, and
+        one added under Monomer A did not appear under Monomer B.
+        """
+        from ..builder import list_library
+
+        polymers = list_library("all")
+        self._polymers = polymers      # for Monomer C, D, … added later
+        source = self.sender()
+        for panel in [self.panel_solo, self.panel_a, self.panel_b,
+                      *self.extra_panels]:
+            if panel is not source:
+                panel.set_polymers(polymers)
+
     # ------------------------------------------------ multi-monomer support
     def n_copolymer_monomers(self) -> int:
         return 2 + len(getattr(self, "extra_panels", []))
@@ -947,6 +993,7 @@ class BuilderTab(QWidget):
                                   self._polymers, self._fragments)
         panel.file_ready.connect(self._on_file_ready)
         panel.log.connect(self.log.emit)
+        panel.library_changed.connect(self._on_library_changed)
         # Insert after the last monomer panel, before the add/remove row.
         self._cop_layout.insertWidget(slot, panel)
         self.extra_panels.append(panel)

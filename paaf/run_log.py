@@ -57,6 +57,12 @@ def run_log(out_dir: Path) -> Iterator[dict]:
         "[%(asctime)s] %(levelname)-7s %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
     handler.setLevel(logging.INFO)
     root.addHandler(handler)
+    # The handler is INFO, but the logger itself is only raised to INFO when
+    # logging_utils configures it; unconfigured it inherits WARNING and every
+    # INFO record would be dropped before reaching the file.
+    previous_level = root.level
+    if root.getEffectiveLevel() > logging.INFO:
+        root.setLevel(logging.INFO)
     root.info("PAAF run started %s — output folder %s",
               _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), out_dir)
     _local.energies = []
@@ -76,3 +82,4 @@ def run_log(out_dir: Path) -> Iterator[dict]:
         root.info("Run log: %s", log_path)
         root.removeHandler(handler)
         handler.close()
+        root.setLevel(previous_level)

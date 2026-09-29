@@ -83,7 +83,10 @@ class LibraryPicker(QDialog):
     # ------------------------------------------------------------ data
     def _load(self) -> None:
         try:
-            from ..builder import list_library
+            # Re-read first, so the user's own polymers are always listed
+            # here — including ones added in the Builder since PAAF started.
+            from ..builder import list_library, reload_library
+            reload_library()
             self._records = list(list_library("all"))
         except Exception:
             self._records = []

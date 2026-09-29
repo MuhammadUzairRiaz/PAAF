@@ -162,8 +162,8 @@ def optimize(
             from .run_log import record_energy
             record_energy(mol.name or "molecule", used_ff, e_initial, e_final,
                           len(mol.atoms))
-        except Exception:
-            pass
+        except Exception as exc:
+            log.debug("Energy not recorded in the run log (%s)", exc)
         if report_energy:
             log.info(
                 "Optimization done (%s):  initial E = %.4f  →  final E = %.4f  "

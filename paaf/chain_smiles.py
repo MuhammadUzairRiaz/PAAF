@@ -176,6 +176,79 @@ def _cap_terminal_carboxylic_acid(chain) -> None:
     log.info("Capped terminal -C(=O)H → -C(=O)OH (polyester end).")
 
 
+def _rotation_matrix(axis, theta):
+    """Rodrigues rotation matrix for a unit ``axis`` by ``theta`` radians."""
+    x, y, z = axis
+    k = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
+    return np.eye(3) + np.sin(theta) * k + (1.0 - np.cos(theta)) * (k @ k)
+
+
+def _relax_junction_torsions(chain, n_steps: int = 36,
+                             cutoff: float = 0.30) -> None:
+    """Spin each unit about its inter-monomer bond to clear clashes.
+
+    ``force_overlap`` aligns a new unit's port with the previous unit's port
+    along the bond axis, but the spin about that axis comes from each port's
+    internal frame — which depends on how that monomer happened to sit in
+    space when its port was made. For a homopolymer every junction repeats
+    the same spin, but where two *different* monomers meet the torsion across
+    the new bond is arbitrary and can drop the next unit's first CH2 straight
+    onto the previous unit's (H–H 0.3 Å, C–H 0.8 Å).
+
+    Walking the chain in order, the downstream part is rotated rigidly about
+    each junction bond to the angle with the least overlap against everything
+    upstream. Bond lengths, angles and connectivity are unchanged. Coordinates
+    are mBuild nm; ``cutoff`` is the contact distance penalised.
+    """
+    units = [c for c in chain.children if c.n_particles > 0]
+    if len(units) < 2:
+        return
+    parts = list(chain.particles())
+    index = {id(p): i for i, p in enumerate(parts)}
+    owner = np.empty(len(parts), dtype=int)
+    for k, unit in enumerate(units):
+        for p in unit.particles():
+            owner[index[id(p)]] = k
+    xyz = np.array([p.pos for p in parts], dtype=float)
+
+    junction = {}
+    for a, b in chain.bonds():
+        i, j = index[id(a)], index[id(b)]
+        if owner[i] > owner[j]:
+            i, j = j, i
+        if owner[j] == owner[i] + 1:
+            junction[owner[j]] = (i, j)
+
+    thetas = np.linspace(0.0, 2.0 * np.pi, n_steps, endpoint=False)
+    for k in range(1, len(units)):
+        if k not in junction:
+            continue
+        i, j = junction[k]
+        axis = xyz[j] - xyz[i]
+        norm = np.linalg.norm(axis)
+        if norm < 1e-9:
+            continue
+        axis /= norm
+        upstream = np.flatnonzero((owner < k) & (np.arange(len(parts)) != i))
+        unit = np.flatnonzero((owner == k) & (np.arange(len(parts)) != j))
+        moving = np.flatnonzero(owner >= k)
+        rel = xyz[unit] - xyz[i]
+        best, best_score = 0.0, np.inf
+        for theta in thetas:
+            moved = rel @ _rotation_matrix(axis, theta).T + xyz[i]
+            d = np.linalg.norm(moved[:, None, :] - xyz[upstream][None, :, :],
+                               axis=-1)
+            score = np.sum(np.clip(cutoff - d, 0.0, None) ** 2)
+            if score < best_score - 1e-12:
+                best, best_score = theta, score
+        if best:
+            rot = _rotation_matrix(axis, best)
+            xyz[moving] = (xyz[moving] - xyz[i]) @ rot.T + xyz[i]
+
+    for p, pos in zip(parts, xyz):
+        p.pos = pos
+
+
 # ------------------------------------------------------------ monomer prep
 def _prepare_monomer(poly_smiles: str, separation: float):
     """Load one ``[*]…[*]`` monomer as a clean mBuild compound and return
@@ -356,6 +429,8 @@ def build_copolymer_from_smiles(
     # n=1 with the full explicit sequence string builds exactly this order
     # (mBuild builds n * len(sequence) units, cycling the sequence).
     chain.build(n=1, sequence=seq_str)
+    # Different monomers meet at an arbitrary torsion; spin them clear.
+    _relax_junction_torsions(chain)
 
     # Cap only if the LAST unit along the chain is a polyester right-end.
     if cap_carboxyl_end and _right_dummy_is_carbonyl(poly_smiles_list[seq[-1]]):

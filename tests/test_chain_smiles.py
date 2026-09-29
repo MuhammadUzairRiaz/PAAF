@@ -72,3 +72,49 @@ def test_build_pbs_chain_has_tight_backbone():
             d = float(np.linalg.norm(coords[i] - coords[j]))
             max_cc = max(max_cc, d)
     assert max_cc < 1.7, f"backbone C-C too long: {max_cc:.3f} Å"
+
+
+@pytest.mark.skipif(not _deps_ok(), reason="rdkit/mbuild/networkx/openbabel not installed")
+def test_copolymer_junctions_do_not_overlap():
+    """Where two different monomers meet, mBuild leaves the torsion across
+    the new bond arbitrary; unrelaxed, every B→A junction of this PBS/PBA
+    pair dropped an H 0.3 Å onto another. The unoptimised chain must have no
+    non-bonded pair (beyond 1-3) closer than 1.0 Å, or 1.5 Å for H–H, and
+    geometry-perceived connectivity must match the builder's bonds."""
+    import numpy as np
+    from rdkit import Chem
+    from rdkit.Chem import rdDetermineBonds
+    from paaf.chain_smiles import build_copolymer_from_smiles
+
+    a = "[*]OCCCCOC(=O)CCC(=O)[*]"
+    b = "[*]OCCCCOC(=O)CCCCC(=O)[*]"
+    seq = [0 if c == "A" else 1 for c in "AABABBBBAABABBABBAABAAAAB"]
+    mol = build_copolymer_from_smiles([a, b], seq, optimize=False)
+
+    coords = mol.coords()
+    elements = [at.element for at in mol.atoms]
+    adj = [set() for _ in elements]
+    for i, j, _ in mol.bonds:
+        adj[i].add(j)
+        adj[j].add(i)
+    dist = np.linalg.norm(coords[:, None, :] - coords[None, :, :], axis=-1)
+    clashes = []
+    for i in range(len(elements)):
+        near = adj[i].union(*(adj[k] for k in adj[i]))
+        for j in np.flatnonzero(dist[i] < 1.5):
+            if j <= i or j in near:
+                continue
+            limit = 1.5 if elements[i] == elements[j] == "H" else 1.0
+            if dist[i, j] < limit:
+                clashes.append((elements[i], int(i), elements[j], int(j),
+                                round(float(dist[i, j]), 2)))
+    assert not clashes, f"{len(clashes)} overlapping pairs, e.g. {clashes[:5]}"
+
+    block = "\n".join([str(len(elements)), "chain"] + [
+        f"{e} {x:.6f} {y:.6f} {z:.6f}" for e, (x, y, z) in zip(elements, coords)])
+    raw = Chem.MolFromXYZBlock(block + "\n")
+    rdDetermineBonds.DetermineConnectivity(raw)
+    perceived = {tuple(sorted((bd.GetBeginAtomIdx(), bd.GetEndAtomIdx())))
+                 for bd in raw.GetBonds()}
+    built = {tuple(sorted((int(i), int(j)))) for i, j, _ in mol.bonds}
+    assert perceived == built
